@@ -39,64 +39,50 @@ A sophisticated cybersecurity honeypot web application that simulates a realisti
 ## 🏗️ Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                        ATTACKER                               │
-│                    (External Network)                         │
-└────────────────────────┬────────────────────────────────────┘
-                         │ HTTP(S)
-┌────────────────────────▼────────────────────────────────────┐
-│                   NGINX (Reverse Proxy)                       │
-│                     Port 80/443                               │
-└────────────────────────┬────────────────────────────────────┘
-                         │ Proxy
-┌────────────────────────▼────────────────────────────────────┐
-│               FLASK HONEYPOT APPLICATION                      │
-│                      Port 5000                                │
-│                                                               │
-│  ┌─────────────────────────────────────────────────────┐    │
-│  │ 1. Request Interceptor (Middleware)                  │    │
-│  │    - Captures all request data                       │    │
-│  │    - Extracts IP, User-Agent, payload                │    │
-│  └────────────────┬────────────────────────────────────┘    │
-│                   │                                           │
-│  ┌────────────────▼────────────────────────────────────┐    │
-│  │ 2. Detection Engine                                  │    │
-│  │    - 30+ pattern matching                            │    │
-│  │    - Attack classification                           │    │
-│  │    - Severity scoring                                │    │
-│  └────────────────┬────────────────────────────────────┘    │
-│                   │                                           │
-│  ┌────────────────▼────────────────────────────────────┐    │
-│  │ 3. Response Engine                                   │    │
-│  │    - Generates fake responses                        │    │
-│  │    - Progressive deception                           │    │
-│  │    - Simulates success/error                         │    │
-│  └────────────────┬────────────────────────────────────┘    │
-│                   │                                           │
-│  ┌────────────────▼────────────────────────────────────┐    │
-│  │ 4. Logging Interface (Queue-based)                   │    │
-│  │    - Non-blocking event queuing                      │    │
-│  │    - Sanitization                                    │    │
-│  │    - JSON serialization                              │    │
-│  └────────────────┬────────────────────────────────────┘    │
-│                   │                                           │
-└───────────────────┼──────────────────────────────────────────┘
-                    │ Writes to file
-┌───────────────────▼──────────────────────────────────────────┐
-│              data/operatordata.jsonl                           │
-│                (Append-only log file)                         │
-└───────────────────┬──────────────────────────────────────────┘
-                    │ Reads from file
-┌───────────────────▼──────────────────────────────────────────┐
-│         OPERATOR DASHBOARD (Standalone App)                   │
-│              Port 5001 (Local Only)                           │
-│                                                               │
-│  - Password protected                                         │
-│  - Real-time monitoring                                       │
-│  - Session tracking                                           │
-│  - Attack analytics                                           │
-└───────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│                              External Client                           │
+└───────────────────────────────┬─────────────────────────────────────────┘
+                                │ HTTP(S)
+┌───────────────────────────────▼─────────────────────────────────────────┐
+│                       Flask Honeypot App (run.py)                      │
+│                                 Port 5000                              │
+│                                                                         │
+│  before_request                                                         │
+│  1) SessionManager.get_or_create_session()                              │
+│     - HMAC-based session identity                                       │
+│  2) RequestInterceptor.analyze()                                        │
+│     - Detection engine + stage inference                                │
+│                                                                         │
+│  route handler                                                          │
+│  3) Public/Admin/API/Files/Terminal deception responses                 │
+│                                                                         │
+│  after_request                                                          │
+│  4) Security headers + persist sid cookie                               │
+│  5) queue_event() -> logging_service.interface                          │
+└───────────────────────────────┬─────────────────────────────────────────┘
+                                │ append JSONL events
+┌───────────────────────────────▼─────────────────────────────────────────┐
+│                           data/operatordata.jsonl                      │
+│                           (append-only event log)                      │
+└───────────────────────────────┬─────────────────────────────────────────┘
+                                │ polled every 2s
+┌───────────────────────────────▼─────────────────────────────────────────┐
+│                Standalone Operator Dashboard (operator_dashboard.py)    │
+│                           Port 5001 (localhost only)                    │
+│                                                                         │
+│  - Auth + lockout controls                                               │
+│  - Active sessions (time-windowed)                                       │
+│  - Historical sessions (separate section/API)                            │
+│  - Live event stream + attack timeline                                   │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
+
+### Runtime Notes
+
+- One browser session is correlated by the sid cookie written in after_request.
+- The operator dashboard separates active vs historical sessions.
+- Active window defaults to 15 minutes and is configurable via OPERATOR_ACTIVE_WINDOW_MINUTES.
+- Asset hits (static files, favicon, robots/sitemap) are tracked separately from interactive requests.
 
 ---
 
@@ -125,11 +111,12 @@ A sophisticated cybersecurity honeypot web application that simulates a realisti
 
 - **Password Protected** - Only you can access
 - **Real-time Monitoring**
-  - Active attacker sessions
+   - Active attacker wall (live session cards)
+   - Historical sessions table (separate from active)
   - Recent attacks timeline
   - Live event log
   - Statistics dashboard
-- **Session Tracking** - IP, stage, request count, attacks
+- **Session Tracking** - IP, stage, request count, attacks, asset vs interactive request mix
 - **Attack Analytics** - By type, severity, endpoint
 - **Event Log** - Full request/response history
 
@@ -284,12 +271,12 @@ Password: test
 
 **LFI (File Explorer):**
 ```
-http://127.0.0.1:5000/files?path=../../../etc/passwd
+http://127.0.0.1:5000/files/browse?path=../../../etc/passwd
 ```
 
 **SSRF:**
 ```
-http://127.0.0.1:5000/api/internal/fetch?url=http://169.254.169.254/latest/meta-data/
+curl -X POST http://127.0.0.1:5000/api/fetch -H "Content-Type: application/json" -d "{\"url\":\"http://169.254.169.254/latest/meta-data/\"}"
 ```
 
 **XSS (Contact Form):**
@@ -338,7 +325,7 @@ git push origin main
    - **Name:** honeypot-security
    - **Environment:** Python 3
    - **Build Command:** `pip install -r requirements.txt`
-   - **Start Command:** `gunicorn run:app --bind 0.0.0.0:$PORT`
+   - **Start Command:** `gunicorn -w 4 -b 0.0.0.0:$PORT "app:create_app()"`
 
 5. Add environment variables:
    ```
@@ -381,6 +368,7 @@ Access: http://127.0.0.1:5001
 | `OPERATOR_SECRET_KEY` | Operator session secret | Random string | ✓ |
 | `OPERATOR_HOST` | Operator bind host | `127.0.0.1` | ✓ |
 | `OPERATOR_PORT` | Operator bind port | `5001` | ✓ |
+| `OPERATOR_ACTIVE_WINDOW_MINUTES` | Active session lookback window | `15` | ✗ |
 | `DATABASE_URL` | PostgreSQL connection (optional) | `postgresql://...` | ✗ |
 | `REDIS_URL` | Redis connection (optional) | `redis://localhost:6379` | ✗ |
 
@@ -389,7 +377,8 @@ Access: http://127.0.0.1:5001
 Session IDs are generated using HMAC(IP + UserAgent + Timestamp + Nonce, SECRET).
 
 - Stored in HttpOnly cookies (prevents XSS theft)
-- Marked as Secure (HTTPS only in production)
+- Marked as Secure in production HTTPS paths
+- Localhost HTTP fallback is supported for local testing so session correlation remains stable
 - SameSite=Lax (prevents CSRF)
 - Automatically regenerated if tampering detected
 
@@ -536,24 +525,40 @@ Honeypot_Website/
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET/POST | `/api/internal/ping` | Ping endpoint (command injection target) |
-| GET/POST | `/api/internal/fetch` | URL fetch (SSRF target) |
-| GET | `/api/internal/users` | User list (fake API) |
+| GET | `/api/v1/health` | API health check |
+| POST | `/api/v1/auth/login` | API login (injection target) |
+| GET | `/api/v1/users` | Fake user list |
+| GET | `/api/v1/users/<id>` | Fake user detail (IDOR target) |
 | GET | `/api/internal/config` | Config API (fake) |
+| GET | `/api/internal/users/admin` | Internal admin user data |
+| GET | `/api/internal/metrics` | Internal metrics |
+| GET | `/api/debug/info` | Debug info leak |
+| GET | `/api/debug/errors` | Debug error dump |
+| GET | `/api/debug/routes` | Route enumeration |
+| GET/POST | `/api/graphql` | GraphQL simulation |
+| POST | `/api/webhooks/receive` | Webhook callback endpoint |
+| POST | `/api/fetch` | URL fetch (SSRF target) |
+| POST | `/api/v1/upload` | File upload simulation |
 
 ### File Endpoints (Honeypot - Port 5000)
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/files?path=` | File explorer (LFI target) |
-| GET | `/files/download?id=` | File download (fake) |
+| GET | `/files/` | File explorer root |
+| GET | `/files/browse?path=` | Browse path (LFI target) |
+| GET | `/files/read?path=` | Read file content simulation (`file=` also accepted) |
+| GET | `/files/download?path=` | File download simulation (`id=` also accepted) |
+| POST | `/files/upload` | Upload simulation |
 
 ### Terminal Endpoints (Honeypot - Port 5000)
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/terminal` | Web terminal page |
-| POST | `/terminal/execute` | Command execution (simulated) |
+| POST | `/terminal/exec` | Command execution (simulated) |
+| POST | `/terminal/api/exec` | API-style command execution |
+| GET/POST | `/terminal/shell` | Shell-style command endpoint |
+| GET | `/terminal/history` | Command history simulation |
 
 ### Operator Dashboard Endpoints (Port 5001)
 
@@ -562,9 +567,11 @@ Honeypot_Website/
 | GET | `/` | Dashboard (password protected) |
 | POST | `/login` | Login |
 | GET | `/logout` | Logout |
-| GET | `/api/sessions` | Active sessions |
-| GET | `/api/attacks` | Recent attacks |
-| GET | `/api/events` | Event log |
+| GET | `/api/sessions` | Sessions (default scope=active; scope=active/history/all) |
+| GET | `/api/sessions/active` | Active sessions only |
+| GET | `/api/sessions/history` | Historical sessions only |
+| GET | `/api/attacks` | Recent attacks (`?limit=` supported) |
+| GET | `/api/events` | Event log (`?limit=` supported) |
 | GET | `/api/stats` | Statistics |
 
 ---
@@ -590,11 +597,15 @@ Credentials from `.env` → `OPERATOR_USERNAME` + `OPERATOR_PASSWORD`
 - Total attacks detected
 
 **Sessions Panel:**
-- Attacker IP address
-- Attack stage (recon, access, exploit, escalate, persist)
-- Request count
-- Number of attacks
-- Last activity time
+- Active users shown as live cards
+- IP + stage + request and attack counts
+- Asset vs interactive request split
+- Recent per-session action feed
+
+**Historical Sessions Panel:**
+- Separate table for non-active sessions
+- Last seen time, request totals, and stage
+- Keeps prior sessions visible without polluting active view
 
 **Attacks Panel:**
 - Timestamp
@@ -681,6 +692,7 @@ PORT=5001
 2. Make sure you've browsed the honeypot (generate activity)
 3. Check that `data/operatordata.jsonl` exists
 4. Restart operator dashboard: `python operator_dashboard.py`
+5. If traffic appears only in history, increase `OPERATOR_ACTIVE_WINDOW_MINUTES`
 
 ### Issue: "Login doesn't work"
 
@@ -746,5 +758,5 @@ Unauthorized access to computer systems is illegal. Use this honeypot only on sy
 ---
 
 **Last Updated:** March 26, 2026
-**Version:** 1.0
+**Version:** 1.1
 **Status:** Production-Ready

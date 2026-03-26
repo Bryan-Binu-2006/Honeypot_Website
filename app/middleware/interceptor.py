@@ -16,6 +16,8 @@ import time
 
 from ..detection.engine import get_detection_engine, AnalysisResult
 from ..session.tracker import SessionTracker
+from ..behavior.attack_chain_engine import get_attack_chain_engine
+from ..integrations import get_integration_manager
 
 
 class RequestInterceptor:
@@ -37,6 +39,8 @@ class RequestInterceptor:
         """Initialize interceptor with detection engine."""
         self._detection_engine = get_detection_engine()
         self._session_tracker = SessionTracker()
+        self._attack_chain_engine = get_attack_chain_engine()
+        self._integration_manager = get_integration_manager()
     
     def analyze(self, request: Request, session_id: str) -> Dict[str, Any]:
         """
@@ -56,6 +60,16 @@ class RequestInterceptor:
         """
         # Extract request data
         request_data = self._extract_request_data(request)
+
+        # Register/update session for external integration correlation.
+        try:
+            self._integration_manager.register_session(
+                session_id=session_id,
+                ip=request_data.get('ip', 'unknown'),
+                timestamp=time.time()
+            )
+        except Exception:
+            pass
         
         # Run detection engine
         analysis = self._detection_engine.analyze(session_id, request_data)
@@ -67,14 +81,42 @@ class RequestInterceptor:
             detected_attacks=[a['type'] for a in analysis.detected_attacks],
             request_data=request_data
         )
+
+        # Attack-chain progression model for multi-stage deception.
+        chain_result = self._attack_chain_engine.track_event(
+            session_id=session_id,
+            request_data=request_data,
+            detected_attacks=analysis.detected_attacks
+        )
+        self._session_tracker.set_chain_state(
+            session_id=session_id,
+            chain_stage=chain_result['stage'],
+            chain_progression=chain_result['progression'],
+            timeline=chain_result['timeline'],
+            attack_path=chain_result['attack_path'],
+            skill_level=chain_result['skill_level'],
+            scenarios_completed=chain_result['scenarios_completed'],
+            next_hints=chain_result.get('next_hints', [])
+        )
         
         # Combine results
         return {
             'detected_attacks': analysis.detected_attacks,
             'stage': tracking_result['stage'],
             'progression': tracking_result['progression_score'],
+            'chain_stage': chain_result['stage'],
+            'chain_progression': chain_result['progression'],
+            'chain_scenarios_completed': chain_result['scenarios_completed'],
+            'chain_newly_unlocked': chain_result.get('newly_unlocked', []),
+            'chain_timeline': chain_result.get('timeline', []),
+            'chain_attack_path': chain_result.get('attack_path', []),
+            'chain_next_hints': chain_result.get('next_hints', []),
+            'attacker_skill_level': chain_result.get('skill_level', 'basic'),
+            'time_spent_seconds': chain_result.get('time_spent_seconds', 0),
+            'techniques_used': chain_result.get('techniques_used', []),
             'recommended_response': analysis.recommended_response,
-            'stage_indicator': analysis.stage_indicator,
+            'stage_indicator': chain_result['stage'],
+            'detection_stage_indicator': analysis.stage_indicator,
             'attack_count': analysis.attack_count,
             'highest_severity': analysis.highest_severity,
             'timestamp': analysis.timestamp,

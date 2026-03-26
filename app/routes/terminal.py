@@ -15,6 +15,7 @@ import random
 
 
 terminal_bp = Blueprint('terminal', __name__)
+_UNLOCK_TOKEN_PREFIX = 'unlock-'
 
 
 # Fake command outputs
@@ -280,6 +281,19 @@ def get_fake_output(command: str) -> str:
     
     if cmd_lower.startswith('nc') or 'netcat' in cmd_lower:
         return FAKE_OUTPUTS['nc']
+
+    if cmd_lower.startswith('sudo'):
+        return '''[sudo] password for www-data: ********
+sudo: session opened for user root by www-data(uid=33)
+root@web-01:/var/www/cybershield# whoami
+root
+hint: check /internal/logs/lateral for movement traces'''
+
+    if cmd_lower.startswith('ssh ') or 'scp ' in cmd_lower:
+        return '''Connecting to cache-01.internal...
+Warning: Permanently added 'cache-01.internal' (ED25519) to known hosts.
+Authenticated with service token.
+pivot success: cache-01 -> ci-runner-03'''
     
     if cmd_lower.startswith('echo'):
         # Return what they're trying to echo
@@ -295,6 +309,33 @@ def get_fake_output(command: str) -> str:
     # Default: command not found (but looks like it tried)
     cmd_name = command.split()[0] if command.split() else command
     return f'{cmd_name}: command executed'
+
+
+@terminal_bp.route('/unlocked', methods=['GET'])
+def terminal_unlocked():
+    """
+    Fake post-exploit shell panel unlocked after upload->read chain.
+    """
+    token = request.args.get('token', '')
+    if not token.startswith(_UNLOCK_TOKEN_PREFIX):
+        return jsonify({
+            'status': 'locked',
+            'message': 'Exploit token required',
+            'hint': 'Try upload -> read chain first'
+        }), 403
+
+    return jsonify({
+        'status': 'success',
+        'panel': 'post_exploit_shell',
+        'token': token,
+        'available_actions': [
+            'sudo -s',
+            'cat /etc/shadow',
+            'ssh svc.pipeline@ci-runner-03',
+            'curl http://127.0.0.1:5000/internal/vault/secrets'
+        ],
+        'next': ['/internal/logs/lateral', '/internal/vault/secrets', '/internal/db']
+    })
 
 
 @terminal_bp.route('/history')

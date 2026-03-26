@@ -7,11 +7,13 @@ from .admin import admin_bp
 from .api import api_bp
 from .files import files_bp
 from .terminal import terminal_bp
+from .internal import internal_bp
 
 __all__ = [
     'public_bp',
     'admin_bp',
     'api_bp',
     'files_bp',
-    'terminal_bp'
+    'terminal_bp',
+    'internal_bp'
 ]

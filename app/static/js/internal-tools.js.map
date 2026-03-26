@@ -1,0 +1,15 @@
+{
+  "version": 3,
+  "file": "internal-tools.js",
+  "sources": ["internal-tools.ts"],
+  "names": ["hiddenEndpoints", "debugTokens", "window", "__CYBERSHIELD_INTERNAL__"],
+  "mappings": "AAAA;AACA;AACA",
+  "x_internal_notes": {
+    "routeHints": [
+      "/api/v2/internal/users?token=forged_admin_token",
+      "/internal/admin-service?x-internal-key=adminkey_int_7fce381d",
+      "/api/internal/storage?file=secrets-rotation.txt"
+    ],
+    "buildMeta": "pipeline deploy-prod 1431"
+  }
+}

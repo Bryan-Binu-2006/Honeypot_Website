@@ -197,10 +197,20 @@ def _build_recent_actions_index(max_events: int = 1500, per_session: int = 8) ->
     return actions
 
 
-def _session_rows(scope: str = "all", limit: int = 80) -> List[Dict[str, Any]]:
+def _session_rows(
+    scope: str = "all",
+    limit: int = 80,
+    ip_filter: str = "",
+    stage_filter: str = "",
+    attack_type_filter: str = ""
+) -> List[Dict[str, Any]]:
     now = datetime.now()
     actions = _build_recent_actions_index()
     rows: List[Dict[str, Any]] = []
+
+    ip_filter = ip_filter.strip().lower()
+    stage_filter = stage_filter.strip().lower()
+    attack_type_filter = attack_type_filter.strip().lower()
 
     for sid, data in _sessions.items():
         is_active = _session_is_active(data, now)
@@ -208,6 +218,16 @@ def _session_rows(scope: str = "all", limit: int = 80) -> List[Dict[str, Any]]:
             continue
         if scope == "history" and is_active:
             continue
+
+        stage_value = str(data.get("chain_stage") or data.get("stage", "recon")).lower()
+        if ip_filter and ip_filter not in str(data.get("ip", "")).lower():
+            continue
+        if stage_filter and stage_filter != stage_value:
+            continue
+        if attack_type_filter:
+            existing_types = [str(v).lower() for v in data.get("attack_types", [])]
+            if not any(attack_type_filter in t for t in existing_types):
+                continue
 
         last_seen_raw = str(data.get("last_seen", ""))
         first_seen_raw = str(data.get("first_seen", ""))
@@ -224,6 +244,13 @@ def _session_rows(scope: str = "all", limit: int = 80) -> List[Dict[str, Any]]:
                 "requests": _safe_int(data.get("request_count"), 0),
                 "attacks": _safe_int(data.get("attacks_detected"), 0),
                 "stage": str(data.get("stage", "recon")),
+                "chain_stage": str(data.get("chain_stage", data.get("stage", "recon"))),
+                "chain_progression": float(data.get("chain_progression", 0.0)),
+                "chain_scenarios_completed": _safe_int(data.get("chain_scenarios_completed"), 0),
+                "chain_attack_path": list(data.get("chain_attack_path", [str(data.get("stage", "recon"))])),
+                "chain_timeline": list(data.get("chain_timeline", []))[-15:],
+                "skill_level": str(data.get("skill_level", "basic")),
+                "time_spent_seconds": _safe_int(data.get("time_spent_seconds"), 0),
                 "attack_types": list(data.get("attack_types", [])),
                 "user_agent": str(data.get("user_agent", "")),
                 "active": is_active,
@@ -254,6 +281,13 @@ def process_event(event: Dict[str, Any]) -> None:
             "attacks_detected": 0,
             "user_agent": str(event.get("user_agent", ""))[:120],
             "stage": str(event.get("stage", "recon")),
+            "chain_stage": str(event.get("chain_stage", event.get("stage", "recon"))),
+            "chain_progression": float(event.get("chain_progression", 0.0) or 0.0),
+            "chain_scenarios_completed": _safe_int(event.get("chain_scenarios_completed"), 0),
+            "chain_attack_path": list(event.get("chain_attack_path", [str(event.get("chain_stage", event.get("stage", "recon")))])),
+            "chain_timeline": list(event.get("chain_timeline", []))[-20:],
+            "skill_level": str(event.get("attacker_skill_level", "basic")),
+            "time_spent_seconds": _safe_int(event.get("time_spent_seconds"), 0),
             "attack_types": [],
             "asset_requests": 0,
             "interaction_requests": 0,
@@ -263,6 +297,28 @@ def process_event(event: Dict[str, Any]) -> None:
     session_data["last_seen"] = str(event.get("timestamp", session_data["last_seen"]))
     session_data["request_count"] += 1
     session_data["stage"] = str(event.get("stage", session_data["stage"]))
+    session_data["chain_stage"] = str(event.get("chain_stage", session_data.get("chain_stage", session_data["stage"])))
+    try:
+        session_data["chain_progression"] = float(event.get("chain_progression", session_data.get("chain_progression", 0.0)))
+    except (TypeError, ValueError):
+        pass
+    session_data["chain_scenarios_completed"] = _safe_int(
+        event.get("chain_scenarios_completed", session_data.get("chain_scenarios_completed", 0))
+    )
+    session_data["skill_level"] = str(event.get("attacker_skill_level", session_data.get("skill_level", "basic")))
+    session_data["time_spent_seconds"] = _safe_int(
+        event.get("time_spent_seconds", session_data.get("time_spent_seconds", 0))
+    )
+
+    incoming_path = event.get("chain_attack_path", [])
+    if isinstance(incoming_path, list) and incoming_path:
+        session_data["chain_attack_path"] = list(incoming_path)
+    elif "chain_attack_path" not in session_data:
+        session_data["chain_attack_path"] = [session_data.get("chain_stage", session_data["stage"])]
+
+    incoming_timeline = event.get("chain_timeline", [])
+    if isinstance(incoming_timeline, list) and incoming_timeline:
+        session_data["chain_timeline"] = incoming_timeline[-20:]
     if is_asset_request:
         session_data["asset_requests"] += 1
     else:
@@ -344,6 +400,13 @@ def load_events_from_file() -> None:
                         "attacks_detected": 0,
                         "user_agent": str(event.get("user_agent", ""))[:120],
                         "stage": str(event.get("stage", "recon")),
+                        "chain_stage": str(event.get("chain_stage", event.get("stage", "recon"))),
+                        "chain_progression": float(event.get("chain_progression", 0.0) or 0.0),
+                        "chain_scenarios_completed": _safe_int(event.get("chain_scenarios_completed"), 0),
+                        "chain_attack_path": list(event.get("chain_attack_path", [str(event.get("chain_stage", event.get("stage", "recon")))])),
+                        "chain_timeline": list(event.get("chain_timeline", []))[-20:],
+                        "skill_level": str(event.get("attacker_skill_level", "basic")),
+                        "time_spent_seconds": _safe_int(event.get("time_spent_seconds"), 0),
                         "attack_types": [],
                         "asset_requests": 0,
                         "interaction_requests": 0,
@@ -353,6 +416,24 @@ def load_events_from_file() -> None:
                 session_data["last_seen"] = str(event.get("timestamp", session_data["last_seen"]))
                 session_data["request_count"] += 1
                 session_data["stage"] = str(event.get("stage", session_data["stage"]))
+                session_data["chain_stage"] = str(event.get("chain_stage", session_data.get("chain_stage", session_data["stage"])))
+                try:
+                    session_data["chain_progression"] = float(event.get("chain_progression", session_data.get("chain_progression", 0.0)))
+                except (TypeError, ValueError):
+                    pass
+                session_data["chain_scenarios_completed"] = _safe_int(
+                    event.get("chain_scenarios_completed", session_data.get("chain_scenarios_completed", 0))
+                )
+                session_data["skill_level"] = str(event.get("attacker_skill_level", session_data.get("skill_level", "basic")))
+                session_data["time_spent_seconds"] = _safe_int(
+                    event.get("time_spent_seconds", session_data.get("time_spent_seconds", 0))
+                )
+                incoming_path = event.get("chain_attack_path", [])
+                if isinstance(incoming_path, list) and incoming_path:
+                    session_data["chain_attack_path"] = list(incoming_path)
+                incoming_timeline = event.get("chain_timeline", [])
+                if isinstance(incoming_timeline, list) and incoming_timeline:
+                    session_data["chain_timeline"] = incoming_timeline[-20:]
                 endpoint = str(event.get("endpoint", "/"))
                 is_asset_request = _is_asset_endpoint(endpoint)
                 if is_asset_request:
@@ -539,6 +620,30 @@ DASHBOARD_HTML = """
                 }
                 .big { font-size: 1.75rem; color: #6cfad3; font-weight: 700; }
                 .label { color: #91a6b8; font-size: .72rem; margin-top: .2rem; letter-spacing: .04em; }
+                .filters {
+                    display: grid;
+                    grid-template-columns: 1.2fr 1fr 1fr auto;
+                    gap: .5rem;
+                    margin-bottom: .9rem;
+                }
+                .f-input, .f-select {
+                    width: 100%;
+                    background: #0c1620;
+                    border: 1px solid #284153;
+                    border-radius: 8px;
+                    color: #c3d8e8;
+                    padding: .45rem .55rem;
+                    font-size: .76rem;
+                }
+                .f-btn {
+                    border: 1px solid #3b5d74;
+                    background: #102131;
+                    color: #b6d7ee;
+                    border-radius: 8px;
+                    padding: .45rem .6rem;
+                    cursor: pointer;
+                    font-size: .76rem;
+                }
                 .grid {
                         display: grid;
                         grid-template-columns: 2fr 1.1fr;
@@ -624,6 +729,27 @@ DASHBOARD_HTML = """
                         padding-top: .35rem;
                         font-size: .72rem;
                 }
+                .chain {
+                    border-top: 1px dashed #2b4153;
+                    border-bottom: 1px dashed #2b4153;
+                    margin: .42rem 0;
+                    padding: .32rem 0;
+                    color: #9bc8e6;
+                    font-size: .69rem;
+                }
+                .timeline {
+                    margin-top: .35rem;
+                    font-size: .68rem;
+                    color: #a3bdd0;
+                }
+                .tl-item {
+                    border-left: 2px solid #274761;
+                    padding-left: .35rem;
+                    margin: .2rem 0;
+                    white-space: nowrap;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                }
                 .act {
                         display: flex;
                         justify-content: space-between;
@@ -668,6 +794,7 @@ DASHBOARD_HTML = """
 
                 @media (max-width: 1020px) {
                         .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+                    .filters { grid-template-columns: 1fr 1fr; }
                         .grid { grid-template-columns: 1fr; }
                 }
 
@@ -677,6 +804,7 @@ DASHBOARD_HTML = """
                         .top { flex-direction: column; align-items: flex-start; }
                         .actions { width: 100%; justify-content: space-between; }
                         .stats { grid-template-columns: 1fr; }
+                        .filters { grid-template-columns: 1fr; }
                         .active-wall { grid-template-columns: 1fr; }
                 }
     </style>
@@ -700,6 +828,20 @@ DASHBOARD_HTML = """
             <div class="stat"><div id="s-total" class="big">0</div><div class="label">TOTAL SESSIONS</div></div>
             <div class="stat"><div id="s-req" class="big">0</div><div class="label">TOTAL REQUESTS</div></div>
             <div class="stat"><div id="s-att" class="big">0</div><div class="label">TOTAL ATTACKS</div></div>
+        </div>
+
+        <div class="filters">
+            <input id="f-ip" class="f-input" placeholder="Filter by IP (contains)" />
+            <select id="f-stage" class="f-select">
+                <option value="">All stages</option>
+                <option value="recon">recon</option>
+                <option value="initial_access">initial_access</option>
+                <option value="privilege_escalation">privilege_escalation</option>
+                <option value="persistence">persistence</option>
+                <option value="data_exfiltration">data_exfiltration</option>
+            </select>
+            <input id="f-attack" class="f-input" placeholder="Filter by attack type" />
+            <button id="f-clear" class="f-btn" type="button">Clear Filters</button>
         </div>
 
         <div class="grid">
@@ -775,8 +917,14 @@ DASHBOARD_HTML = """
                 const typeHtml = (s.attack_types || []).slice(0, 5).map(v => '<span class="chip">' + esc(v) + '</span>').join('')
                     || '<span class="chip">none</span>';
 
+                const chainPath = (s.chain_attack_path || [s.chain_stage || s.stage]).join(' -> ');
+                const attackViz = ['User'].concat((s.attack_types || []).slice(0, 4)).concat([s.chain_stage || s.stage]).join(' -> ');
+                const timeline = (s.chain_timeline || []).slice(-4).map(it =>
+                    '<div class="tl-item">' + esc(t(it.timestamp)) + ' ' + esc(it.label || it.event_type || 'event') + '</div>'
+                ).join('') || '<div class="tl-item">No chain events yet</div>';
+
                 return '<div class="session-card">'
-                    + '<div class="session-head"><span class="mono">' + esc(s.ip) + '</span><span class="stage">' + esc(s.stage) + '</span></div>'
+                    + '<div class="session-head"><span class="mono">' + esc(s.ip) + '</span><span class="stage">' + esc(s.chain_stage || s.stage) + '</span></div>'
                     + '<div class="metrics">'
                     + '<div class="metric">Requests: <b>' + esc(s.requests) + '</b></div>'
                     + '<div class="metric">Attacks: <b>' + esc(s.attacks) + '</b></div>'
@@ -786,9 +934,14 @@ DASHBOARD_HTML = """
                     + '<div class="metrics">'
                     + '<div class="metric">Last seen: <b>' + esc(ago(s.seconds_since_seen)) + '</b></div>'
                     + '<div class="metric">Session age: <b>' + esc(ago(s.age_seconds)) + '</b></div>'
+                    + '<div class="metric">Skill: <b>' + esc(s.skill_level || 'basic') + '</b></div>'
+                    + '<div class="metric">Chain score: <b>' + esc(Math.round((Number(s.chain_progression || 0)) * 100) + '%') + '</b></div>'
                     + '</div>'
+                    + '<div class="chain">' + esc(chainPath) + '</div>'
+                    + '<div class="chain">' + esc(attackViz) + '</div>'
                     + '<div class="types">' + typeHtml + '</div>'
                     + '<div class="actions-feed">' + actionHtml + '</div>'
+                    + '<div class="timeline">' + timeline + '</div>'
                     + '</div>';
             }).join('');
         }
@@ -850,10 +1003,15 @@ DASHBOARD_HTML = """
         }
 
     async function refresh(){
+            const ip = encodeURIComponent(document.getElementById('f-ip').value || '');
+            const stage = encodeURIComponent(document.getElementById('f-stage').value || '');
+            const attackType = encodeURIComponent(document.getElementById('f-attack').value || '');
+            const query = `ip=${ip}&stage=${stage}&attack_type=${attackType}`;
+
             const [stats, activeSessions, historySessions, attacks, events] = await Promise.all([
                 j('/api/stats'),
-                j('/api/sessions?scope=active'),
-                j('/api/sessions?scope=history'),
+                j('/api/sessions?scope=active&' + query),
+                j('/api/sessions?scope=history&' + query),
                 j('/api/attacks?limit=300'),
                 j('/api/events?limit=800')
             ]);
@@ -871,6 +1029,15 @@ DASHBOARD_HTML = """
     }
 
     refresh();
+        document.getElementById('f-ip').addEventListener('input', () => refresh());
+        document.getElementById('f-stage').addEventListener('change', () => refresh());
+        document.getElementById('f-attack').addEventListener('input', () => refresh());
+        document.getElementById('f-clear').addEventListener('click', () => {
+            document.getElementById('f-ip').value = '';
+            document.getElementById('f-stage').value = '';
+            document.getElementById('f-attack').value = '';
+            refresh();
+        });
         setInterval(refresh, 3000);
   </script>
 </body>
@@ -927,14 +1094,25 @@ def api_sessions():
         scope = request.args.get("scope", "active").strip().lower()
         if scope not in {"active", "history", "all"}:
             scope = "active"
-        return jsonify(_session_rows(scope=scope, limit=80))
+        ip_filter = request.args.get("ip", "")
+        stage_filter = request.args.get("stage", "")
+        attack_type_filter = request.args.get("attack_type", "")
+        return jsonify(
+            _session_rows(
+                scope=scope,
+                limit=120,
+                ip_filter=ip_filter,
+                stage_filter=stage_filter,
+                attack_type_filter=attack_type_filter,
+            )
+        )
 
 
 @app.route("/api/sessions/active")
 @api_login_required
 def api_sessions_active():
     with _lock:
-        return jsonify(_session_rows(scope="active", limit=80))
+        return jsonify(_session_rows(scope="active", limit=120))
 
 
 @app.route("/api/sessions/history")

@@ -65,11 +65,36 @@ def api_login():
     }), 401
 
 
-@api_bp.route('/v1/users')
+@api_bp.route('/v1/users', methods=['GET', 'POST'])
 def api_users():
     """
     Users list - IDOR and enumeration target.
     """
+    if request.method == 'POST':
+        payload = request.get_json(silent=True) or {}
+        if not payload:
+            payload = dict(request.form)
+
+        username = payload.get('username', f"user_{random.randint(100, 999)}")
+        requested_role = str(payload.get('role', 'user')).lower()
+
+        # Intentional mass-assignment simulation.
+        assigned_role = requested_role if requested_role in {'admin', 'analyst', 'developer'} else 'user'
+
+        return jsonify({
+            'status': 'success',
+            'message': 'User object created with provided attributes',
+            'data': {
+                'id': random.randint(5000, 9000),
+                'username': username,
+                'email': payload.get('email', f'{username}@cybershield.local'),
+                'role': assigned_role,
+                'created_by': 'self-service-api',
+                'flags': {'requires_review': assigned_role == 'admin'}
+            },
+            'next': ['/api/v2/internal/users', '/admin/users']
+        })
+
     users = [
         {'id': 1, 'username': 'admin', 'email': 'admin@cybershield.local', 'role': 'admin'},
         {'id': 2, 'username': 'john.doe', 'email': 'john.doe@cybershield.local', 'role': 'user'},
@@ -175,6 +200,84 @@ def api_internal_metrics():
         'cache_hit_rate': 0.94,
         'error_rate': 0.002,
         'avg_response_time_ms': 45
+    })
+
+
+@api_bp.route('/v2/internal/users')
+def api_v2_internal_users():
+    """
+    Hidden API version that appears to bypass auth checks.
+    """
+    token = request.headers.get('Authorization', '') or request.args.get('token', '')
+    token_lower = token.lower()
+
+    elevated = any(v in token_lower for v in ['forged_admin_token', 'alg:none', 'bearer'])
+    if not elevated:
+        return jsonify({
+            'status': 'partial',
+            'message': 'v2 endpoint reachable but restricted fields omitted',
+            'hint': 'Admin claims required for full export',
+            'next': ['/admin/debug/config', '/api/internal/config']
+        }), 206
+
+    return jsonify({
+        'status': 'success',
+        'version': 'v2-internal-preview',
+        'users': [
+            {'id': 1, 'username': 'admin', 'role': 'super_admin', 'mfa_bypass': True},
+            {'id': 7, 'username': 'svc.sync', 'role': 'service', 'token_scope': 'storage:read'},
+            {'id': 8, 'username': 'svc.pipeline', 'role': 'service', 'token_scope': 'deploy:*'},
+        ],
+        'next': ['/api/internal/storage', '/internal/admin-service']
+    })
+
+
+@api_bp.route('/internal/storage')
+def api_internal_storage():
+    """
+    Internal storage API unlocked by SSRF/credential pivot simulation.
+    """
+    access_key = request.args.get('access_key', '') or request.headers.get('X-Access-Key', '')
+    token = request.args.get('token', '') or request.headers.get('X-Session-Token', '')
+    file_name = request.args.get('file', 'inventory-2026-03.csv')
+
+    has_creds = ('asiafakekey' in access_key.lower()) or ('fakesessiontoken' in token.lower())
+    if not has_creds:
+        return jsonify({
+            'status': 'error',
+            'message': 'temporary credentials required',
+            'hint': 'Use metadata credentials from SSRF chain',
+            'next': ['/api/fetch']
+        }), 401
+
+    fake_files = {
+        'inventory-2026-03.csv': 'asset_id,owner,region\nA102,ops,us-east-1\nA103,payments,us-east-1',
+        'customers-2026.csv': 'customer_id,email,tier\n1001,finance@corp.local,enterprise\n1002,ops@corp.local,pro',
+        'secrets-rotation.txt': 'jwt_signing_key=debug-weak-secret-2026\nadminkey=adminkey_int_7fce381d',
+        'backup-index.json': '{"bucket":"cybershield-prod-backup","latest":"2026-03-26T02:11:20Z"}',
+    }
+
+    content = fake_files.get(file_name, 'file not found in index; listing returned instead')
+    return jsonify({
+        'status': 'success',
+        'storage': 's3://cybershield-internal-data',
+        'file': file_name,
+        'content': content,
+        'next': ['/internal/vault/secrets', '/internal/db?table=employees']
+    })
+
+
+@api_bp.route('/internal/employees')
+def api_internal_employees():
+    """Employee directory with intentionally sensitive fields."""
+    return jsonify({
+        'status': 'success',
+        'records': [
+            {'name': 'Nina R', 'email': 'nina.r@cybershield.local', 'temp_password': 'Fall2025!temp'},
+            {'name': 'Liam P', 'email': 'liam.p@cybershield.local', 'temp_password': 'RotateMe#24'},
+            {'name': 'Maya K', 'email': 'maya.k@cybershield.local', 'temp_password': 'TempReset!998'},
+        ],
+        'next': ['/internal/collab/slack', '/internal/vault/secrets']
     })
 
 
@@ -319,10 +422,11 @@ def fetch_url():
     
     # Check for SSRF
     ssrf_detected = any(a.get('type') == 'ssrf' for a in detected_attacks)
+    metadata_target = '169.254.169.254' in url
     
-    if ssrf_detected:
+    if ssrf_detected or metadata_target:
         # Return fake metadata response
-        if '169.254.169.254' in url:
+        if metadata_target:
             return jsonify({
                 'status': 'success',
                 'content': {
@@ -330,8 +434,10 @@ def fetch_url():
                     'Type': 'AWS-HMAC',
                     'AccessKeyId': 'ASIAFAKEKEY12345678',
                     'SecretAccessKey': 'FakeSecretAccessKey1234567890',
-                    'Token': 'FakeSessionToken...'
-                }
+                    'Token': 'FakeSessionToken...',
+                    'Next': '/api/internal/storage?file=secrets-rotation.txt&access_key=ASIAFAKEKEY12345678&token=FakeSessionToken...'
+                },
+                'pivot': ['/api/internal/storage', '/internal/admin-service']
             })
         
         return jsonify({

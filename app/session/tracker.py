@@ -69,6 +69,13 @@ class SessionTracker:
             'created': time.time(),
             'last_seen': time.time(),
             'stage': 'recon',
+            'chain_stage': 'recon',
+            'chain_progression': 0.0,
+            'chain_timeline': [],
+            'chain_path': ['recon'],
+            'chain_skill_level': 'basic',
+            'chain_scenarios_completed': 0,
+            'chain_next_hints': [],
             'stage_confidence': 0.0,
             'endpoints': [],
             'attacks': [],
@@ -131,9 +138,44 @@ class SessionTracker:
         return {
             'stage': session['stage'],
             'progression_score': session['progression_score'],
+            'chain_stage': session.get('chain_stage', session['stage']),
+            'chain_progression': session.get('chain_progression', 0.0),
             'techniques_count': len(session['techniques_used']),
             'request_count': len(session['endpoints'])
         }
+
+    def set_chain_state(
+        self,
+        session_id: str,
+        chain_stage: str,
+        chain_progression: float,
+        timeline: List[Dict[str, Any]],
+        attack_path: List[str],
+        skill_level: str,
+        scenarios_completed: int,
+        next_hints: Optional[List[str]] = None
+    ) -> None:
+        """Attach attack-chain context to a tracked session."""
+        session = self._sessions[session_id]
+        session['chain_stage'] = chain_stage
+        session['chain_progression'] = max(0.0, min(float(chain_progression), 1.0))
+        session['chain_timeline'] = list(timeline)[-40:]
+        session['chain_path'] = list(attack_path) if attack_path else [chain_stage]
+        session['chain_skill_level'] = skill_level
+        session['chain_scenarios_completed'] = int(scenarios_completed)
+        session['chain_next_hints'] = list(next_hints or [])[:8]
+
+        # Keep legacy stage moving forward with chain progression for compatibility.
+        legacy_stage_map = {
+            'recon': 'recon',
+            'initial_access': 'access',
+            'privilege_escalation': 'escalate',
+            'persistence': 'persist',
+            'data_exfiltration': 'persist'
+        }
+        mapped_stage = legacy_stage_map.get(chain_stage)
+        if mapped_stage and self.STAGES[mapped_stage] >= self.STAGES.get(session['stage'], 0):
+            session['stage'] = mapped_stage
     
     def _determine_stage(
         self,
@@ -221,6 +263,13 @@ class SessionTracker:
             'session_id': session_id,
             'duration': time.time() - session['created'],
             'stage': session['stage'],
+            'chain_stage': session.get('chain_stage', session['stage']),
+            'chain_progression': session.get('chain_progression', session['progression_score']),
+            'chain_timeline': session.get('chain_timeline', []),
+            'chain_path': session.get('chain_path', [session['stage']]),
+            'chain_skill_level': session.get('chain_skill_level', 'basic'),
+            'chain_scenarios_completed': session.get('chain_scenarios_completed', 0),
+            'chain_next_hints': session.get('chain_next_hints', []),
             'progression': session['progression_score'],
             'techniques': list(session['techniques_used']),
             'endpoint_count': len(session['endpoints']),

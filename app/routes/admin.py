@@ -123,6 +123,25 @@ def create_api_key():
     return jsonify({'status': 'success', 'key': new_key})
 
 
+@admin_bp.route('/api-keys/validate', methods=['POST'])
+def validate_api_key():
+    """Validate leaked or discovered API key against fake internal scopes."""
+    key = request.form.get('key', '')
+    if request.is_json:
+        payload = request.get_json(silent=True) or {}
+        key = payload.get('key', key)
+
+    key_lower = key.lower()
+    if 'adminkey' in key_lower or 'cs_admin' in key_lower:
+        return jsonify({
+            'status': 'success',
+            'scope': ['admin:*', 'vault:read', 'db:read'],
+            'next': ['/internal/admin-service?x-internal-key=adminkey_int_7fce381d']
+        })
+
+    return jsonify({'status': 'error', 'message': 'invalid key'}), 401
+
+
 @admin_bp.route('/wallet')
 def wallet():
     """
@@ -155,6 +174,20 @@ def wallet():
     ]
     
     return render_template('admin/wallet.html', wallets=wallets, transactions=transactions)
+
+
+@admin_bp.route('/wallet/transactions')
+def wallet_transactions():
+    """Detailed transaction ledger used as a high-value data lure."""
+    return jsonify({
+        'status': 'success',
+        'ledger': [
+            {'tx': '0xabc102', 'asset': 'BTC', 'amount': 0.83, 'to': 'cold-vault-1', 'approved_by': 'ops.breakglass'},
+            {'tx': '0xabc103', 'asset': 'ETH', 'amount': 12.4, 'to': 'hot-wallet-7', 'approved_by': 'finance.lead'},
+            {'tx': '0xabc104', 'asset': 'USDT', 'amount': 95000.0, 'to': 'vendor-clearing', 'approved_by': 'payroll.bot'},
+        ],
+        'next': ['/internal/logs', '/internal/vault/secrets']
+    })
 
 
 @admin_bp.route('/config')
@@ -258,6 +291,25 @@ def debug():
     return render_template('admin/debug.html', debug_info=debug_info)
 
 
+@admin_bp.route('/debug/config')
+def debug_config_export():
+    """Debug config export with intentionally weak secrets for JWT/key abuse chains."""
+    return jsonify({
+        'status': 'success',
+        'debug_mode': False,
+        'jwt': {
+            'algorithm': 'HS256',
+            'weak_secret': 'debug-weak-secret-2026',
+            'example_forged_token': 'Bearer forged_admin_token'
+        },
+        'internal_keys': {
+            'admin_service_key': 'adminkey_int_7fce381d',
+            'storage_read_key': 'stor_key_1f23b8bb'
+        },
+        'next': ['/api/v2/internal/users?token=forged_admin_token', '/internal/admin-service?x-internal-key=adminkey_int_7fce381d']
+    })
+
+
 @admin_bp.route('/debug/eval', methods=['POST'])
 def debug_eval():
     """
@@ -339,6 +391,23 @@ def database_query():
         })
     
     return jsonify({'status': 'error', 'message': 'Query validation failed'})
+
+
+@admin_bp.route('/database/console')
+def database_console():
+    """Fake interactive database console endpoint."""
+    query = request.args.get('q', 'select id,username,role from users limit 3')
+    return jsonify({
+        'status': 'success',
+        'engine': 'postgresql 14.9',
+        'query': query,
+        'rows': [
+            {'id': 1, 'username': 'admin', 'role': 'administrator'},
+            {'id': 7, 'username': 'svc.sync', 'role': 'service'},
+            {'id': 9, 'username': 'ops.breakglass', 'role': 'security'},
+        ],
+        'next': ['/internal/db?table=employees', '/internal/vault/secrets']
+    })
 
 
 @admin_bp.route('/logs')

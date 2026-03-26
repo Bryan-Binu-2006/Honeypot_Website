@@ -230,7 +230,14 @@ class LoggingInterface:
             user_agent=self._sanitize_string(
                 raw_request.get('headers', {}).get('User-Agent', '')
             )[:500],
-            additional_data='{}'
+            additional_data=self._sanitize_json({
+                'chain_stage': analysis.get('chain_stage', ''),
+                'chain_progression': analysis.get('chain_progression', 0.0),
+                'chain_scenarios_completed': analysis.get('chain_scenarios_completed', 0),
+                'attacker_skill_level': analysis.get('attacker_skill_level', 'basic'),
+                'chain_attack_path': analysis.get('chain_attack_path', []),
+                'chain_next_hints': analysis.get('chain_next_hints', []),
+            })
         )
     
     def _generate_event_id(self, session_id: str, timestamp: float) -> str:
@@ -344,7 +351,17 @@ def _write_to_operator_log(session_id: str, analysis: Dict[str, Any], response_c
             'method': raw_request.get('method', 'GET'),
             'detected_attacks': analysis.get('detected_attacks', []),
             'stage': analysis.get('stage_indicator', 'recon'),
-            'response_code': response_code
+            'response_code': response_code,
+            'chain_stage': analysis.get('chain_stage', analysis.get('stage_indicator', 'recon')),
+            'chain_progression': analysis.get('chain_progression', 0.0),
+            'chain_scenarios_completed': analysis.get('chain_scenarios_completed', 0),
+            'chain_timeline': analysis.get('chain_timeline', []),
+            'chain_attack_path': analysis.get('chain_attack_path', []),
+            'chain_next_hints': analysis.get('chain_next_hints', []),
+            'attacker_skill_level': analysis.get('attacker_skill_level', 'basic'),
+            'time_spent_seconds': analysis.get('time_spent_seconds', 0),
+            'techniques_used': analysis.get('techniques_used', []),
+            'detection_stage_indicator': analysis.get('detection_stage_indicator', 'recon')
         }
         
         with open(log_file, 'a') as f:

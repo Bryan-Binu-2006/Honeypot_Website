@@ -180,12 +180,14 @@ def _register_blueprints(app: Flask) -> None:
     from .routes.api import api_bp
     from .routes.files import files_bp
     from .routes.terminal import terminal_bp
+    from .routes.internal import internal_bp
     
     app.register_blueprint(public_bp)
     app.register_blueprint(admin_bp, url_prefix='/admin')
     app.register_blueprint(api_bp, url_prefix='/api')
     app.register_blueprint(files_bp, url_prefix='/files')
     app.register_blueprint(terminal_bp, url_prefix='/terminal')
+    app.register_blueprint(internal_bp, url_prefix='/internal')
 
 
 def _register_error_handlers(app: Flask) -> None:

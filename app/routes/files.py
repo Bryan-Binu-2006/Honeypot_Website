@@ -11,9 +11,14 @@ INTERNAL DOCUMENTATION:
 
 from flask import Blueprint, request, jsonify, g, Response
 import os
+import time
+from typing import Dict
 
 
 files_bp = Blueprint('files', __name__)
+
+
+_UPLOADED_PAYLOADS: Dict[str, Dict[str, str]] = {}
 
 
 # Fake filesystem structure
@@ -294,6 +299,27 @@ def file_read():
         return get_lfi_response(target)
     
     normalized = normalize_path(target)
+
+    # Chain simulation: uploaded polyglot payload executed via read endpoint.
+    if normalized in _UPLOADED_PAYLOADS:
+        payload_meta = _UPLOADED_PAYLOADS[normalized]
+        cmd = request.args.get('cmd', 'id')
+        unlock_token = payload_meta.get('unlock_token', 'unlock-missing')
+        return jsonify({
+            'status': 'success',
+            'execution': 'simulated',
+            'file': normalized,
+            'command': cmd,
+            'output': [
+                'uid=33(www-data) gid=33(www-data) groups=33(www-data)',
+                'sudo: session opened for user root by www-data(uid=33)',
+                'pivot hint: /terminal/unlocked?token=' + unlock_token,
+            ],
+            'next': [
+                f'/terminal/unlocked?token={unlock_token}',
+                '/internal/logs/lateral'
+            ]
+        })
     
     if normalized in FAKE_FILE_CONTENTS:
         return jsonify({
@@ -314,6 +340,20 @@ def file_upload():
     detected_attacks = g.get('detected_attacks', [])
     
     filename = request.form.get('filename', 'uploaded_file')
+    if request.is_json:
+        payload = request.get_json(silent=True) or {}
+        filename = payload.get('filename', filename)
+
+    upload_path = f'/uploads/2024/03/{filename}'
+    looks_polyglot = '.php' in filename.lower() and any(ext in filename.lower() for ext in ['.jpg', '.png', '.gif'])
+    unlock_token = f"unlock-{abs(hash(str(g.get('session_id', 'anon')) + filename)) % 999999:06d}"
+
+    if looks_polyglot:
+        _UPLOADED_PAYLOADS[upload_path] = {
+            'session_id': str(g.get('session_id', 'unknown')),
+            'unlock_token': unlock_token,
+            'created': str(time.time())
+        }
     
     # Always return success
     return jsonify({
@@ -321,9 +361,18 @@ def file_upload():
         'message': 'File uploaded successfully',
         'file': {
             'name': filename,
-            'path': f'/uploads/2024/03/{filename}',
+            'path': upload_path,
             'size': len(request.data) if request.data else 0
-        }
+        },
+        'analysis': {
+            'mime_check': 'image/jpeg',
+            'extension_check': 'passed',
+            'executable_signature': 'not_detected' if looks_polyglot else 'clean'
+        },
+        'next': [
+            f'/files/read?path={upload_path}&cmd=id',
+            f'/terminal/unlocked?token={unlock_token}'
+        ]
     })
 
 

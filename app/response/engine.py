@@ -50,7 +50,8 @@ class ResponseEngine:
         detected_attacks: List[Dict[str, Any]],
         progression_score: float,
         request_data: Dict[str, Any],
-        recommendation: str
+        recommendation: str,
+        chain_context: Optional[Dict[str, Any]] = None
     ) -> Tuple[Response, Dict[str, Any]]:
         """
         Generate appropriate fake response.
@@ -73,8 +74,12 @@ class ResponseEngine:
         metadata = {
             'response_type': 'normal',
             'template_used': None,
-            'delay_applied': 0
+            'delay_applied': 0,
+            'behavior_mode': 'stable'
         }
+
+        chain_context = chain_context or {}
+        chain_stage = str(chain_context.get('stage', 'recon'))
         
         # No attacks detected - return None to allow normal processing
         if not detected_attacks or recommendation == 'normal':
@@ -89,7 +94,8 @@ class ResponseEngine:
             template = self._get_success_response(
                 attack_type,
                 progression_score,
-                request_data
+                request_data,
+                chain_stage
             )
         elif recommendation == 'fake_error':
             template = self._get_error_response(attack_type, request_data)
@@ -99,6 +105,14 @@ class ResponseEngine:
             template = self._get_delayed_response()
         else:
             template = get_response_for_attack(attack_type)
+
+        template, behavior_mode = self._apply_context_variation(
+            template=template,
+            attack_type=attack_type,
+            progression_score=progression_score,
+            chain_stage=chain_stage
+        )
+        metadata['behavior_mode'] = behavior_mode
         
         # Apply delay for realism
         if template.delay_ms > 0:
@@ -133,7 +147,8 @@ class ResponseEngine:
         self,
         attack_type: str,
         progression: float,
-        request_data: Dict[str, Any]
+        request_data: Dict[str, Any],
+        chain_stage: str = 'recon'
     ) -> ResponseTemplate:
         """
         Generate a "successful" attack response.
@@ -155,9 +170,69 @@ class ResponseEngine:
         # Command injection responses
         if attack_type == 'command_injection':
             return self._get_command_response(params, body)
+
+        # Stage-aware progression: reward deeper chain stages with richer data.
+        if chain_stage in {'privilege_escalation', 'persistence', 'data_exfiltration'}:
+            boosted = min(1.0, progression + 0.15)
+            return get_progressive_response(attack_type, boosted)
         
         # Default success
         return get_progressive_response(attack_type, progression)
+
+    def _apply_context_variation(
+        self,
+        template: ResponseTemplate,
+        attack_type: str,
+        progression_score: float,
+        chain_stage: str
+    ) -> Tuple[ResponseTemplate, str]:
+        """
+        Apply realistic response variability.
+
+        Behavior modes:
+        - stable: deterministic response
+        - jitter: minor timing variance
+        - partial_failure: intermittent error despite valid chain
+        """
+        behavior_mode = 'stable'
+        staged_bonus = {
+            'recon': 0.0,
+            'initial_access': 0.05,
+            'privilege_escalation': 0.08,
+            'persistence': 0.12,
+            'data_exfiltration': 0.15,
+        }
+        variance = random.random()
+        partial_failure_threshold = 0.05 if progression_score < 0.5 else 0.12
+        partial_failure_threshold += staged_bonus.get(chain_stage, 0.0)
+
+        if variance < partial_failure_threshold:
+            behavior_mode = 'partial_failure'
+            return (
+                ResponseTemplate(
+                    attack_type=template.attack_type,
+                    status_code=503,
+                    headers={'Content-Type': 'application/json'},
+                    body='{"status":"error","message":"backend shard timeout, retry shortly"}',
+                    delay_ms=max(template.delay_ms, 800) + random.randint(100, 900)
+                ),
+                behavior_mode
+            )
+
+        if variance < 0.75:
+            behavior_mode = 'jitter'
+            return (
+                ResponseTemplate(
+                    attack_type=template.attack_type,
+                    status_code=template.status_code,
+                    headers=template.headers,
+                    body=template.body,
+                    delay_ms=max(0, template.delay_ms + random.randint(-80, 220))
+                ),
+                behavior_mode
+            )
+
+        return template, behavior_mode
     
     def _get_lfi_response(
         self,

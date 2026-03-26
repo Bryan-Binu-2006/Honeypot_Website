@@ -13,6 +13,10 @@ INTERNAL DOCUMENTATION:
 from flask import Blueprint, render_template, request, redirect, url_for, g, jsonify, make_response
 from ..response.engine import get_response_engine
 from ..session.manager import SessionManager
+from ..behavior.attack_chain_engine import get_attack_chain_engine
+
+
+_RESET_TOKENS = {}
 
 
 public_bp = Blueprint('public', __name__)
@@ -297,9 +301,58 @@ def forgot_password():
     """Password reset - potential for account enumeration."""
     if request.method == 'POST':
         email = request.form.get('email', '')
-        # Always return success (prevents enumeration)
+        predictable_seed = (email or 'unknown').split('@')[0].replace('.', '').replace('_', '')[:10]
+        token = f"RST-{predictable_seed}-{len(email):02d}"
+        _RESET_TOKENS[token] = {
+            'email': email,
+            'created': g.get('request_analysis', {}).get('timestamp', 0)
+        }
+
+        chain_engine = get_attack_chain_engine()
+        chain_state = chain_engine.get_state(str(g.get('session_id', 'anonymous')))
+
         return jsonify({
             'status': 'success',
-            'message': f'If an account exists for {email}, a reset link has been sent.'
+            'message': f'If an account exists for {email}, a reset link has been sent.',
+            'debug_note': 'mail_queue fallback active - token preview enabled for testing',
+            'reset_preview': f'/reset-password?token={token}',
+            'next_hint': chain_state.get('next_hints', ['/reset-password?token='])
         })
     return render_template('forgot_password.html')
+
+
+@public_bp.route('/reset-password', methods=['GET', 'POST'])
+def reset_password():
+    """
+    Password reset endpoint with intentionally predictable token flow.
+    """
+    token = request.args.get('token', '') or request.form.get('token', '')
+    token_record = _RESET_TOKENS.get(token)
+
+    if request.method == 'GET':
+        if token_record:
+            return jsonify({
+                'status': 'ready',
+                'email': token_record.get('email', 'unknown@cybershield.local'),
+                'token': token,
+                'message': 'Token accepted. Submit new_password via POST to complete reset.'
+            })
+        return jsonify({'status': 'error', 'message': 'Invalid token'}), 400
+
+    new_password = request.form.get('new_password', '')
+    if request.is_json:
+        payload = request.get_json(silent=True) or {}
+        token = payload.get('token', token)
+        new_password = payload.get('new_password', new_password)
+        token_record = _RESET_TOKENS.get(token)
+
+    if token_record and new_password:
+        return jsonify({
+            'status': 'success',
+            'message': 'Password reset accepted',
+            'account': token_record.get('email', 'unknown@cybershield.local'),
+            'session_token': f"sess_reset_{token.lower()}_granted",
+            'next': ['/api/v1/auth/login', '/admin/dashboard']
+        })
+
+    return jsonify({'status': 'error', 'message': 'Missing token or password'}), 400
