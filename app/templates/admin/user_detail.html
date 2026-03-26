@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+
+{% block title %}User Details - CyberShield Admin{% endblock %}
+
+{% block content %}
+{% include 'admin/nav.html' %}
+
+<h1 style="margin-bottom: 2rem;">User Details</h1>
+
+<div class="card">
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem;">
+        <div>
+            <h3>Profile Information</h3>
+            <table>
+                <tr>
+                    <td><strong>ID:</strong></td>
+                    <td>{{ user.id }}</td>
+                </tr>
+                <tr>
+                    <td><strong>Username:</strong></td>
+                    <td>{{ user.username }}</td>
+                </tr>
+                <tr>
+                    <td><strong>Email:</strong></td>
+                    <td>{{ user.email }}</td>
+                </tr>
+                <tr>
+                    <td><strong>Role:</strong></td>
+                    <td><span class="badge badge-info">{{ user.role }}</span></td>
+                </tr>
+                <tr>
+                    <td><strong>Last Login:</strong></td>
+                    <td>{{ user.last_login }}</td>
+                </tr>
+                {% if user.phone %}
+                <tr>
+                    <td><strong>Phone:</strong></td>
+                    <td>{{ user.phone }}</td>
+                </tr>
+                {% endif %}
+                {% if user.api_key %}
+                <tr>
+                    <td><strong>API Key:</strong></td>
+                    <td><code style="background: #0d0d0d; padding: 0.25rem 0.5rem; border-radius: 3px;">{{ user.api_key }}</code></td>
+                </tr>
+                {% endif %}
+            </table>
+        </div>
+        
+        <div>
+            <h3>Actions</h3>
+            <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                <a href="/admin/users/{{ user.id }}/edit" class="btn btn-primary">Edit User</a>
+                <a href="/admin/users/{{ user.id }}/reset-password" class="btn" style="background: rgba(255,193,7,0.2); color: #ffc107;">Reset Password</a>
+                <a href="/admin/users/{{ user.id }}/disable" class="btn" style="background: rgba(220,53,69,0.2); color: #dc3545;">Disable Account</a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card" style="margin-top: 1rem;">
+    <h3>Recent Activity</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>Date</th>
+                <th>Action</th>
+                <th>IP Address</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>2024-03-15 10:23:45</td>
+                <td>Login</td>
+                <td>192.168.1.100</td>
+            </tr>
+            <tr>
+                <td>2024-03-14 18:45:22</td>
+                <td>Password Changed</td>
+                <td>192.168.1.100</td>
+            </tr>
+            <tr>
+                <td>2024-03-14 09:12:33</td>
+                <td>API Key Generated</td>
+                <td>10.0.0.45</td>
+            </tr>
+        </tbody>
+    </table>
+</div>
+{% endblock %}

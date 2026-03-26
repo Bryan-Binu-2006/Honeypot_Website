@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+
+{% block title %}Logs - CyberShield Admin{% endblock %}
+
+{% block content %}
+{% include 'admin/nav.html' %}
+
+<h1 style="margin-bottom: 2rem;">System Logs</h1>
+
+<div class="card">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+        <h3>Recent Logs</h3>
+        <div>
+            <select style="width: auto; margin-right: 0.5rem;">
+                <option>All Levels</option>
+                <option>ERROR</option>
+                <option>WARNING</option>
+                <option>INFO</option>
+            </select>
+            <button class="btn btn-primary">Refresh</button>
+        </div>
+    </div>
+    
+    <div style="background: #0d0d0d; border-radius: 5px; padding: 1rem; font-family: monospace; font-size: 0.9rem; max-height: 500px; overflow-y: auto;">
+        {% for log in logs %}
+        <div style="padding: 0.5rem 0; border-bottom: 1px solid #222; {% if log.level == 'ERROR' %}color: #dc3545;{% elif log.level == 'WARNING' %}color: #ffc107;{% else %}color: #28a745;{% endif %}">
+            <span style="color: #666;">[{{ log.timestamp }}]</span>
+            <span style="font-weight: bold;">[{{ log.level }}]</span>
+            {{ log.message }}
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+<div class="card" style="margin-top: 1rem;">
+    <h3>Log Files</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>File</th>
+                <th>Size</th>
+                <th>Modified</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>/var/log/cybershield/app.log</td>
+                <td>24.5 MB</td>
+                <td>2024-03-15 10:25:34</td>
+                <td><a href="#" style="color: #00d4ff;">Download</a></td>
+            </tr>
+            <tr>
+                <td>/var/log/cybershield/error.log</td>
+                <td>1.2 MB</td>
+                <td>2024-03-15 10:20:00</td>
+                <td><a href="#" style="color: #00d4ff;">Download</a></td>
+            </tr>
+            <tr>
+                <td>/var/log/cybershield/access.log</td>
+                <td>156 MB</td>
+                <td>2024-03-15 10:25:34</td>
+                <td><a href="#" style="color: #00d4ff;">Download</a></td>
+            </tr>
+        </tbody>
+    </table>
+</div>
+{% endblock %}

@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+
+{% block title %}Database - CyberShield Admin{% endblock %}
+
+{% block content %}
+{% include 'admin/nav.html' %}
+
+<h1 style="margin-bottom: 2rem;">Database Management</h1>
+
+<div class="card">
+    <h3>Database Tables</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>Table Name</th>
+                <th>Rows</th>
+                <th>Size</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for table in tables %}
+            <tr>
+                <td>{{ table.name }}</td>
+                <td>{{ table.rows }}</td>
+                <td>{{ table.size }}</td>
+                <td>
+                    <a href="#" onclick="queryTable('{{ table.name }}')" style="color: #00d4ff;">Query</a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="card" style="margin-top: 1rem;">
+    <h3>SQL Console</h3>
+    <form method="POST" action="/admin/database/query" id="sql-form">
+        <div>
+            <label style="display: block; margin-bottom: 0.5rem; color: #999;">Execute SQL Query</label>
+            <textarea name="query" id="sql-query" rows="4" placeholder="SELECT * FROM users LIMIT 10;"></textarea>
+        </div>
+        <button type="submit" class="btn btn-primary">Execute Query</button>
+    </form>
+    
+    <div id="query-results" style="margin-top: 1rem;"></div>
+</div>
+
+<script>
+function queryTable(name) {
+    document.getElementById('sql-query').value = 'SELECT * FROM ' + name + ' LIMIT 10;';
+}
+
+document.getElementById('sql-form').addEventListener('submit', function(e) {
+    e.preventDefault();
+    const query = document.getElementById('sql-query').value;
+    
+    fetch('/admin/database/query', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: 'query=' + encodeURIComponent(query)
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.status === 'success') {
+            let html = '<table><thead><tr>';
+            data.columns.forEach(col => html += '<th>' + col + '</th>');
+            html += '</tr></thead><tbody>';
+            data.rows.forEach(row => {
+                html += '<tr>';
+                row.forEach(val => html += '<td>' + val + '</td>');
+                html += '</tr>';
+            });
+            html += '</tbody></table>';
+            document.getElementById('query-results').innerHTML = html;
+        } else {
+            document.getElementById('query-results').innerHTML = '<div style="color: #dc3545;">Error: ' + data.message + '</div>';
+        }
+    });
+});
+</script>
+{% endblock %}

@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+
+{% block title %}Configuration - CyberShield Admin{% endblock %}
+
+{% block content %}
+{% include 'admin/nav.html' %}
+
+<h1 style="margin-bottom: 2rem;">System Configuration</h1>
+
+<div class="card">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+        <h3>Current Configuration</h3>
+        <a href="/admin/config/export" class="btn btn-primary">Export Config</a>
+    </div>
+    
+    {% for section, values in config.items() %}
+    <div style="margin-bottom: 2rem;">
+        <h4 style="color: #e94560; text-transform: uppercase; margin-bottom: 1rem;">{{ section }}</h4>
+        <table>
+            {% for key, value in values.items() %}
+            <tr>
+                <td style="width: 30%; color: #999;">{{ key }}</td>
+                <td><code style="background: #0d0d0d; padding: 0.25rem 0.5rem; border-radius: 3px;">{{ value }}</code></td>
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
+    {% endfor %}
+</div>
+
+<div class="card" style="margin-top: 1rem; background: rgba(220, 53, 69, 0.1); border-color: rgba(220, 53, 69, 0.3);">
+    <h3 style="color: #dc3545;">⚠️ Warning</h3>
+    <p style="color: #999;">Configuration changes require a server restart. Make sure to backup your current configuration before making changes.</p>
+</div>
+{% endblock %}

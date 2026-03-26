@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+
+{% block title %}User Management - CyberShield Admin{% endblock %}
+
+{% block content %}
+{% include 'admin/nav.html' %}
+
+<h1 style="margin-bottom: 2rem;">User Management</h1>
+
+<div class="card">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+        <h3>All Users</h3>
+        <button class="btn btn-primary">+ Add User</button>
+    </div>
+    
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Username</th>
+                <th>Email</th>
+                <th>Role</th>
+                <th>Last Login</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for user in users %}
+            <tr>
+                <td>{{ user.id }}</td>
+                <td><a href="/admin/users/{{ user.id }}" style="color: #00d4ff;">{{ user.username }}</a></td>
+                <td>{{ user.email }}</td>
+                <td><span class="badge {% if user.role == 'administrator' %}badge-danger{% else %}badge-success{% endif %}">{{ user.role }}</span></td>
+                <td>{{ user.last_login }}</td>
+                <td>
+                    <a href="/admin/users/{{ user.id }}" style="color: #00d4ff; margin-right: 0.5rem;">View</a>
+                    <a href="/admin/users/{{ user.id }}/edit" style="color: #ffc107; margin-right: 0.5rem;">Edit</a>
+                    <a href="/admin/users/{{ user.id }}/delete" style="color: #dc3545;">Delete</a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

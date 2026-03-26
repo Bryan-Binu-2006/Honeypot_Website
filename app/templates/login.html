@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+
+{% block title %}Login - CyberShield{% endblock %}
+
+{% block content %}
+<div style="max-width: 400px; margin: 4rem auto;">
+    <div class="card">
+        <h2 style="text-align: center; margin-bottom: 2rem;">Sign In</h2>
+        
+        {% if error %}
+        <div style="background: rgba(220, 53, 69, 0.2); border: 1px solid #dc3545; padding: 1rem; border-radius: 5px; margin-bottom: 1rem; color: #dc3545;">
+            {{ error }}
+        </div>
+        {% endif %}
+        
+        <form method="POST" action="/login">
+            <div>
+                <label for="username" style="display: block; margin-bottom: 0.5rem; color: #999;">Username or Email</label>
+                <input type="text" id="username" name="username" required placeholder="Enter your username">
+            </div>
+            
+            <div>
+                <label for="password" style="display: block; margin-bottom: 0.5rem; color: #999;">Password</label>
+                <input type="password" id="password" name="password" required placeholder="Enter your password">
+            </div>
+            
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                <label style="display: flex; align-items: center; color: #999; cursor: pointer;">
+                    <input type="checkbox" name="remember" style="width: auto; margin-right: 0.5rem;">
+                    Remember me
+                </label>
+                <a href="/forgot-password" style="color: #00d4ff; text-decoration: none; font-size: 0.9rem;">Forgot password?</a>
+            </div>
+            
+            <button type="submit" class="btn btn-primary" style="width: 100%;">Sign In</button>
+        </form>
+        
+        <div style="text-align: center; margin-top: 2rem; color: #999;">
+            Don't have an account? <a href="/signup" style="color: #00d4ff; text-decoration: none;">Sign up</a>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+
+{% block title %}CyberShield - Enterprise Security Solutions{% endblock %}
+
+{% block content %}
+<section class="hero" style="text-align: center; padding: 4rem 0;">
+    <h1 style="font-size: 3rem; margin-bottom: 1rem;">
+        <span style="color: #00d4ff;">Enterprise</span> Security Platform
+    </h1>
+    <p style="font-size: 1.2rem; color: #999; max-width: 600px; margin: 0 auto 2rem;">
+        Protect your digital assets with our comprehensive cybersecurity solution. 
+        Advanced threat detection, real-time monitoring, and incident response.
+    </p>
+    <a href="/login" class="btn btn-primary" style="margin-right: 1rem;">Get Started</a>
+    <a href="/about" class="btn" style="background: transparent; border: 1px solid #00d4ff; color: #00d4ff;">Learn More</a>
+</section>
+
+<section class="features" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 2rem; margin-top: 4rem;">
+    <div class="card">
+        <h3>🛡️ Threat Detection</h3>
+        <p>Real-time monitoring and detection of security threats using advanced machine learning algorithms.</p>
+    </div>
+    
+    <div class="card">
+        <h3>🔍 Vulnerability Scanning</h3>
+        <p>Comprehensive scanning of your infrastructure to identify and remediate security vulnerabilities.</p>
+    </div>
+    
+    <div class="card">
+        <h3>📊 Security Analytics</h3>
+        <p>Deep insights into your security posture with detailed analytics and reporting dashboards.</p>
+    </div>
+    
+    <div class="card">
+        <h3>🚨 Incident Response</h3>
+        <p>24/7 incident response team ready to help you contain and remediate security breaches.</p>
+    </div>
+    
+    <div class="card">
+        <h3>🔐 Compliance</h3>
+        <p>Ensure compliance with industry standards including PCI-DSS, HIPAA, SOC 2, and GDPR.</p>
+    </div>
+    
+    <div class="card">
+        <h3>☁️ Cloud Security</h3>
+        <p>Secure your cloud infrastructure across AWS, Azure, and Google Cloud Platform.</p>
+    </div>
+</section>
+
+<section class="stats" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 2rem; margin-top: 4rem; text-align: center;">
+    <div>
+        <div style="font-size: 3rem; color: #00d4ff; font-weight: bold;">500+</div>
+        <div style="color: #999;">Clients Protected</div>
+    </div>
+    <div>
+        <div style="font-size: 3rem; color: #00d4ff; font-weight: bold;">1M+</div>
+        <div style="color: #999;">Threats Blocked</div>
+    </div>
+    <div>
+        <div style="font-size: 3rem; color: #00d4ff; font-weight: bold;">99.9%</div>
+        <div style="color: #999;">Uptime SLA</div>
+    </div>
+    <div>
+        <div style="font-size: 3rem; color: #00d4ff; font-weight: bold;">24/7</div>
+        <div style="color: #999;">Support</div>
+    </div>
+</section>
+
+<section class="cta" style="text-align: center; margin-top: 4rem; padding: 3rem; background: rgba(0, 212, 255, 0.1); border-radius: 10px;">
+    <h2 style="color: #00d4ff; margin-bottom: 1rem;">Ready to Secure Your Business?</h2>
+    <p style="color: #999; margin-bottom: 2rem;">Start your free trial today. No credit card required.</p>
+    <a href="/signup" class="btn btn-primary">Start Free Trial</a>
+</section>
+{% endblock %}
