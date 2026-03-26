@@ -243,17 +243,27 @@ class SessionManager:
                 'timestamp': time.time()
             })
     
-    def set_session_cookie(self, response, session_id: str) -> None:
+    def set_session_cookie(
+        self,
+        response,
+        session_id: str,
+        *,
+        cookie_name: str = 'sid',
+        httponly: bool = True,
+        secure: bool = True,
+        samesite: str = 'Lax',
+        max_age: int = 86400 * 7
+    ) -> None:
         """
         Set secure session cookie on response.
         
         INTERNAL: Cookie is HttpOnly, Secure, SameSite=Lax
         """
         response.set_cookie(
-            'sid',
+            cookie_name,
             session_id,
-            httponly=True,
-            secure=True,  # Set to False in dev
-            samesite='Lax',
-            max_age=86400 * 7  # 7 days
+            httponly=httponly,
+            secure=secure,
+            samesite=samesite,
+            max_age=max_age
         )

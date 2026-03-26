@@ -58,6 +58,7 @@ OPERATOR_SECRET_KEY = os.environ.get("OPERATOR_SECRET_KEY", "change-this-operato
 OPERATOR_SESSION_TIMEOUT_MINUTES = int(os.environ.get("OPERATOR_SESSION_TIMEOUT_MINUTES", "120"))
 OPERATOR_FAILED_LOGIN_LIMIT = int(os.environ.get("OPERATOR_FAILED_LOGIN_LIMIT", "5"))
 OPERATOR_LOCKOUT_SECONDS = int(os.environ.get("OPERATOR_LOCKOUT_SECONDS", "300"))
+OPERATOR_ACTIVE_WINDOW_MINUTES = int(os.environ.get("OPERATOR_ACTIVE_WINDOW_MINUTES", "15"))
 
 if OPERATOR_PASSWORD_HASH:
     _PASSWORD_HASH = OPERATOR_PASSWORD_HASH
@@ -141,8 +142,107 @@ def _safe_parse_iso(ts: str) -> datetime | None:
         return None
 
 
+def _safe_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _is_asset_endpoint(endpoint: str) -> bool:
+    normalized = str(endpoint or "").lower()
+    if not normalized:
+        return False
+    return (
+        normalized.startswith("/static/")
+        or normalized in {"/favicon.ico", "/robots.txt", "/sitemap.xml"}
+        or normalized.endswith((".css", ".js", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".webp", ".map"))
+    )
+
+
+def _session_is_active(session_data: Dict[str, Any], now: datetime | None = None) -> bool:
+    now = now or datetime.now()
+    cutoff = now - timedelta(minutes=OPERATOR_ACTIVE_WINDOW_MINUTES)
+    last_seen_dt = _safe_parse_iso(str(session_data.get("last_seen", "")))
+    return bool(last_seen_dt and last_seen_dt >= cutoff)
+
+
+def _build_recent_actions_index(max_events: int = 1500, per_session: int = 8) -> Dict[str, List[Dict[str, Any]]]:
+    actions: Dict[str, List[Dict[str, Any]]] = {}
+    scanned = 0
+    for event in reversed(_events):
+        if scanned >= max_events:
+            break
+        scanned += 1
+
+        session_id_full = str(event.get("session_id_full", ""))
+        if not session_id_full:
+            continue
+
+        session_actions = actions.setdefault(session_id_full, [])
+        if len(session_actions) >= per_session:
+            continue
+
+        session_actions.append(
+            {
+                "timestamp": str(event.get("timestamp", "")),
+                "method": str(event.get("method", "GET")),
+                "endpoint": str(event.get("endpoint", "/")),
+                "response": _safe_int(event.get("response"), 200),
+                "attacks": _safe_int(event.get("attacks"), 0),
+                "is_asset_request": bool(event.get("is_asset_request", False)),
+            }
+        )
+
+    return actions
+
+
+def _session_rows(scope: str = "all", limit: int = 80) -> List[Dict[str, Any]]:
+    now = datetime.now()
+    actions = _build_recent_actions_index()
+    rows: List[Dict[str, Any]] = []
+
+    for sid, data in _sessions.items():
+        is_active = _session_is_active(data, now)
+        if scope == "active" and not is_active:
+            continue
+        if scope == "history" and is_active:
+            continue
+
+        last_seen_raw = str(data.get("last_seen", ""))
+        first_seen_raw = str(data.get("first_seen", ""))
+        last_seen_dt = _safe_parse_iso(last_seen_raw)
+        first_seen_dt = _safe_parse_iso(first_seen_raw)
+
+        rows.append(
+            {
+                "id": f"{sid[:16]}...",
+                "full_id": sid,
+                "ip": str(data.get("ip", "unknown")),
+                "first_seen": first_seen_raw,
+                "last_seen": last_seen_raw,
+                "requests": _safe_int(data.get("request_count"), 0),
+                "attacks": _safe_int(data.get("attacks_detected"), 0),
+                "stage": str(data.get("stage", "recon")),
+                "attack_types": list(data.get("attack_types", [])),
+                "user_agent": str(data.get("user_agent", "")),
+                "active": is_active,
+                "seconds_since_seen": int((now - last_seen_dt).total_seconds()) if last_seen_dt else None,
+                "age_seconds": int((now - first_seen_dt).total_seconds()) if first_seen_dt else None,
+                "asset_requests": _safe_int(data.get("asset_requests"), 0),
+                "interaction_requests": _safe_int(data.get("interaction_requests"), 0),
+                "recent_actions": actions.get(sid, []),
+            }
+        )
+
+    rows.sort(key=lambda x: x.get("last_seen") or "", reverse=True)
+    return rows[:limit]
+
+
 def process_event(event: Dict[str, Any]) -> None:
     session_id = str(event.get("session_id", "unknown"))
+    endpoint = str(event.get("endpoint", "/"))
+    is_asset_request = _is_asset_endpoint(endpoint)
 
     if session_id not in _sessions:
         _sessions[session_id] = {
@@ -155,12 +255,18 @@ def process_event(event: Dict[str, Any]) -> None:
             "user_agent": str(event.get("user_agent", ""))[:120],
             "stage": str(event.get("stage", "recon")),
             "attack_types": [],
+            "asset_requests": 0,
+            "interaction_requests": 0,
         }
 
     session_data = _sessions[session_id]
     session_data["last_seen"] = str(event.get("timestamp", session_data["last_seen"]))
     session_data["request_count"] += 1
     session_data["stage"] = str(event.get("stage", session_data["stage"]))
+    if is_asset_request:
+        session_data["asset_requests"] += 1
+    else:
+        session_data["interaction_requests"] += 1
 
     detected = event.get("detected_attacks", [])
     if isinstance(detected, list):
@@ -174,10 +280,11 @@ def process_event(event: Dict[str, Any]) -> None:
             _attacks.append(
                 {
                     "session_id": f"{session_id[:16]}...",
+                    "session_id_full": session_id,
                     "ip": str(event.get("ip", "unknown")),
                     "type": attack_type,
                     "severity": str(attack.get("severity", "UNKNOWN")),
-                    "endpoint": str(event.get("endpoint", "/")),
+                    "endpoint": endpoint,
                     "timestamp": str(event.get("timestamp", "")),
                 }
             )
@@ -186,11 +293,13 @@ def process_event(event: Dict[str, Any]) -> None:
         {
             "timestamp": str(event.get("timestamp", "")),
             "session_id": f"{session_id[:16]}...",
+            "session_id_full": session_id,
             "ip": str(event.get("ip", "unknown")),
             "method": str(event.get("method", "GET")),
-            "endpoint": str(event.get("endpoint", "/")),
+            "endpoint": endpoint,
             "attacks": len(detected) if isinstance(detected, list) else 0,
-            "response": int(event.get("response_code", 200)),
+            "response": _safe_int(event.get("response_code"), 200),
+            "is_asset_request": is_asset_request,
         }
     )
 
@@ -236,12 +345,20 @@ def load_events_from_file() -> None:
                         "user_agent": str(event.get("user_agent", ""))[:120],
                         "stage": str(event.get("stage", "recon")),
                         "attack_types": [],
+                        "asset_requests": 0,
+                        "interaction_requests": 0,
                     }
 
                 session_data = sessions_local[session_id]
                 session_data["last_seen"] = str(event.get("timestamp", session_data["last_seen"]))
                 session_data["request_count"] += 1
                 session_data["stage"] = str(event.get("stage", session_data["stage"]))
+                endpoint = str(event.get("endpoint", "/"))
+                is_asset_request = _is_asset_endpoint(endpoint)
+                if is_asset_request:
+                    session_data["asset_requests"] += 1
+                else:
+                    session_data["interaction_requests"] += 1
 
                 detected = event.get("detected_attacks", [])
                 if isinstance(detected, list):
@@ -255,10 +372,11 @@ def load_events_from_file() -> None:
                         attacks_local.append(
                             {
                                 "session_id": f"{session_id[:16]}...",
+                                "session_id_full": session_id,
                                 "ip": str(event.get("ip", "unknown")),
                                 "type": attack_type,
                                 "severity": str(attack.get("severity", "UNKNOWN")),
-                                "endpoint": str(event.get("endpoint", "/")),
+                                "endpoint": endpoint,
                                 "timestamp": str(event.get("timestamp", "")),
                             }
                         )
@@ -267,11 +385,13 @@ def load_events_from_file() -> None:
                     {
                         "timestamp": str(event.get("timestamp", "")),
                         "session_id": f"{session_id[:16]}...",
+                        "session_id_full": session_id,
                         "ip": str(event.get("ip", "unknown")),
                         "method": str(event.get("method", "GET")),
-                        "endpoint": str(event.get("endpoint", "/")),
+                        "endpoint": endpoint,
                         "attacks": len(detected) if isinstance(detected, list) else 0,
-                        "response": int(event.get("response_code", 200)),
+                        "response": _safe_int(event.get("response_code"), 200),
+                        "is_asset_request": is_asset_request,
                     }
                 )
 
@@ -289,13 +409,7 @@ def load_events_from_file() -> None:
 
 def get_stats() -> Dict[str, int]:
     now = datetime.now()
-    cutoff = now - timedelta(minutes=15)
-    active = 0
-
-    for sess in _sessions.values():
-        last_seen_dt = _safe_parse_iso(sess.get("last_seen", ""))
-        if last_seen_dt and last_seen_dt >= cutoff:
-            active += 1
+    active = sum(1 for sess in _sessions.values() if _session_is_active(sess, now))
 
     return {
         "active_sessions": active,
@@ -360,76 +474,279 @@ DASHBOARD_HTML = """
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Honeypot Operator Dashboard</title>
     <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: Consolas, Monaco, monospace; background: #0a0a0a; color: #00ff88; min-height: 100vh; padding: 1rem; }
-        .top { display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem; border-bottom:1px solid #1f2937; padding-bottom:.75rem; }
-        .actions { display:flex; gap:.5rem; align-items:center; }
-        .btn { color:#0a0a0a; background:#00ff88; text-decoration:none; padding:.35rem .6rem; border-radius:6px; font-weight:700; }
-        .stats { display:grid; grid-template-columns:repeat(4,1fr); gap:1rem; margin-bottom:1rem; }
-        .card { background:#111; border:1px solid #1f2937; border-radius:8px; padding:1rem; }
-        .big { font-size:2rem; color:#7dd3fc; }
-        .label { color:#9ca3af; font-size:.8rem; }
-        .grid { display:grid; grid-template-columns:1fr 1fr; gap:1rem; }
-        .panel { background:#111; border:1px solid #1f2937; border-radius:8px; height:390px; overflow:hidden; display:flex; flex-direction:column; }
-        .ph { padding:.6rem .8rem; border-bottom:1px solid #1f2937; color:#cbd5e1; }
-        .pc { padding:.5rem; overflow:auto; flex:1; }
-        table { width:100%; border-collapse:collapse; font-size:.82rem; }
-        th, td { text-align:left; padding:.4rem; border-bottom:1px solid #1f2937; }
-        th { color:#94a3b8; }
-        .sev-CRITICAL { color:#ef4444; font-weight:700; } .sev-HIGH { color:#f97316; } .sev-MEDIUM { color:#facc15; } .sev-LOW { color:#22c55e; }
-        .stage { text-transform:uppercase; font-size:.75rem; color:#93c5fd; }
-        .events { font-size:.78rem; }
-        .event { border-bottom:1px solid #1f2937; padding:.3rem 0; }
-        .muted { color:#9ca3af; }
-        .warn { margin-bottom:.75rem; color:#fca5a5; }
+                * { box-sizing: border-box; margin: 0; padding: 0; }
+                body {
+                        font-family: Consolas, Monaco, monospace;
+                        background: radial-gradient(circle at 12% 20%, #151f2a 0%, #0a1118 45%, #05080d 100%);
+                        color: #d2f7ee;
+                        min-height: 100vh;
+                        padding: 1rem;
+                }
+                .shell {
+                        border: 1px solid #223140;
+                        border-radius: 14px;
+                        background: rgba(6, 12, 18, 0.86);
+                        padding: 1rem;
+                        box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+                }
+                .top {
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                        gap: 1rem;
+                        padding-bottom: .8rem;
+                        border-bottom: 1px solid #223140;
+                        margin-bottom: 1rem;
+                }
+                .top h2 { color: #87f1ff; font-size: 1.1rem; letter-spacing: .03em; }
+                .subtitle { color: #8ba3b8; font-size: .78rem; margin-top: .15rem; }
+                .actions { display:flex; gap:.5rem; align-items:center; }
+                .btn {
+                        color: #031216;
+                        background: linear-gradient(135deg, #6ff5c7, #45d6ff);
+                        text-decoration: none;
+                        padding: .35rem .6rem;
+                        border-radius: 7px;
+                        font-weight: 700;
+                }
+                .badge-user {
+                        color: #b9d8e8;
+                        border: 1px solid #2c4559;
+                        border-radius: 7px;
+                        padding: .3rem .5rem;
+                        font-size: .78rem;
+                }
+                .warn {
+                        margin-bottom: .9rem;
+                        color: #ffb8b8;
+                        border: 1px dashed #62333d;
+                        border-radius: 8px;
+                        padding: .45rem .6rem;
+                        background: rgba(93, 33, 42, .14);
+                        font-size: .78rem;
+                }
+                .stats {
+                        display: grid;
+                        grid-template-columns: repeat(4, minmax(0, 1fr));
+                        gap: .65rem;
+                        margin-bottom: .9rem;
+                }
+                .stat {
+                        background: linear-gradient(180deg, rgba(22, 33, 44, .8), rgba(14, 22, 31, .8));
+                        border: 1px solid #213242;
+                        border-radius: 10px;
+                        padding: .75rem;
+                }
+                .big { font-size: 1.75rem; color: #6cfad3; font-weight: 700; }
+                .label { color: #91a6b8; font-size: .72rem; margin-top: .2rem; letter-spacing: .04em; }
+                .grid {
+                        display: grid;
+                        grid-template-columns: 2fr 1.1fr;
+                        gap: .7rem;
+                }
+                .panel {
+                        background: rgba(8, 15, 22, .88);
+                        border: 1px solid #1d2d3b;
+                        border-radius: 10px;
+                        min-height: 320px;
+                        display: flex;
+                        flex-direction: column;
+                        overflow: hidden;
+                }
+                .ph {
+                        padding: .62rem .78rem;
+                        border-bottom: 1px solid #1d2d3b;
+                        color: #b6cfdf;
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                        font-size: .82rem;
+                }
+                .pc { padding: .55rem; overflow: auto; flex: 1; }
+                .active-wall {
+                        display: grid;
+                        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+                        gap: .55rem;
+                }
+                .session-card {
+                        border: 1px solid #27465b;
+                        background: linear-gradient(180deg, rgba(20, 37, 51, .62), rgba(11, 20, 30, .62));
+                        border-radius: 9px;
+                        padding: .6rem;
+                }
+                .session-head {
+                        display: flex;
+                        justify-content: space-between;
+                        gap: .5rem;
+                        margin-bottom: .4rem;
+                        color: #a8ddff;
+                        font-size: .82rem;
+                }
+                .mono { font-family: Consolas, Monaco, monospace; }
+                .stage {
+                        text-transform: uppercase;
+                        font-size: .67rem;
+                        letter-spacing: .08em;
+                        color: #9ce9ff;
+                        background: rgba(47, 96, 121, .32);
+                        border-radius: 999px;
+                        padding: .16rem .44rem;
+                }
+                .metrics {
+                        display: grid;
+                        grid-template-columns: repeat(2, minmax(0, 1fr));
+                        gap: .35rem;
+                        margin-bottom: .45rem;
+                }
+                .metric {
+                        border: 1px solid #1e3648;
+                        border-radius: 7px;
+                        padding: .3rem .42rem;
+                        font-size: .73rem;
+                        color: #9cb4c5;
+                }
+                .metric b { color: #d7ffef; }
+                .types {
+                        margin-bottom: .45rem;
+                        display: flex;
+                        flex-wrap: wrap;
+                        gap: .25rem;
+                }
+                .chip {
+                        border: 1px solid #3a5366;
+                        color: #b5d5ea;
+                        border-radius: 999px;
+                        padding: .1rem .45rem;
+                        font-size: .64rem;
+                }
+                .actions-feed {
+                        border-top: 1px dashed #2b4153;
+                        padding-top: .35rem;
+                        font-size: .72rem;
+                }
+                .act {
+                        display: flex;
+                        justify-content: space-between;
+                        gap: .5rem;
+                        border-bottom: 1px solid rgba(35, 52, 66, .55);
+                        padding: .18rem 0;
+                }
+                .act:last-child { border-bottom: none; }
+                .act-left { color: #c4d8e8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+                .act-right { color: #92aabc; }
+                .asset { color: #738ca1; }
+                .sev-CRITICAL { color:#ff6666; font-weight:700; }
+                .sev-HIGH { color:#ff9f66; }
+                .sev-MEDIUM { color:#ffd66e; }
+                .sev-LOW { color:#89efb6; }
+                table { width: 100%; border-collapse: collapse; font-size: .76rem; }
+                th, td { text-align: left; padding: .38rem; border-bottom: 1px solid #1a2935; }
+                th { color: #8ea5b8; font-size: .7rem; letter-spacing: .03em; }
+                .events { font-size: .72rem; }
+                .event {
+                        border-bottom: 1px solid #1a2a36;
+                        padding: .26rem 0;
+                        color: #bfd4e3;
+                        display: flex;
+                        justify-content: space-between;
+                        gap: .8rem;
+                }
+                .event:last-child { border-bottom: none; }
+                .event-main { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+                .muted { color: #7f93a4; }
+                .danger { color: #ff8f8f; }
+                .ok { color: #97f7c3; }
+                .empty {
+                        color: #7f93a4;
+                        border: 1px dashed #2a3d4d;
+                        border-radius: 8px;
+                        padding: .7rem;
+                        text-align: center;
+                        margin: .2rem;
+                        font-size: .78rem;
+                }
+
+                @media (max-width: 1020px) {
+                        .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+                        .grid { grid-template-columns: 1fr; }
+                }
+
+                @media (max-width: 640px) {
+                        body { padding: .5rem; }
+                        .shell { padding: .7rem; }
+                        .top { flex-direction: column; align-items: flex-start; }
+                        .actions { width: 100%; justify-content: space-between; }
+                        .stats { grid-template-columns: 1fr; }
+                        .active-wall { grid-template-columns: 1fr; }
+                }
     </style>
 </head>
 <body>
-  <div class="warn">Private operator console (localhost only). Use SSH tunnel: local 6001 → VM 127.0.0.1:5001</div>
-  <div class="top">
-    <h2>Honeypot Operator Dashboard</h2>
-    <div class="actions">
-      <span class="muted">User: {{ username }}</span>
-      <a class="btn" href="/logout">Logout</a>
+    <div class="shell">
+        <div class="warn">Private operator console (localhost only). Tunnel example: local 6001 -> VM 127.0.0.1:5001</div>
+        <div class="top">
+            <div>
+                <h2>Honeypot Operator Matrix</h2>
+                <div class="subtitle">Live sessions, actions, and historical traffic from real event logs</div>
+            </div>
+            <div class="actions">
+                <span class="badge-user">User: {{ username }}</span>
+                <a class="btn" href="/logout">Logout</a>
+            </div>
     </div>
-  </div>
 
-  <div class="stats">
-    <div class="card"><div id="s-active" class="big">0</div><div class="label">ACTIVE (15m)</div></div>
-    <div class="card"><div id="s-total" class="big">0</div><div class="label">TOTAL SESSIONS</div></div>
-    <div class="card"><div id="s-req" class="big">0</div><div class="label">TOTAL REQUESTS</div></div>
-    <div class="card"><div id="s-att" class="big">0</div><div class="label">TOTAL ATTACKS</div></div>
-  </div>
+        <div class="stats">
+            <div class="stat"><div id="s-active" class="big">0</div><div class="label">ACTIVE SESSIONS (15M)</div></div>
+            <div class="stat"><div id="s-total" class="big">0</div><div class="label">TOTAL SESSIONS</div></div>
+            <div class="stat"><div id="s-req" class="big">0</div><div class="label">TOTAL REQUESTS</div></div>
+            <div class="stat"><div id="s-att" class="big">0</div><div class="label">TOTAL ATTACKS</div></div>
+        </div>
 
-  <div class="grid">
-    <div class="panel">
-      <div class="ph">Sessions</div>
-      <div class="pc">
-        <table>
-          <thead><tr><th>IP</th><th>Stage</th><th>Req</th><th>Atk</th><th>Last</th></tr></thead>
-          <tbody id="sessions"></tbody>
-        </table>
+        <div class="grid">
+            <div class="panel">
+                <div class="ph"><span>Active Users</span><span id="active-count" class="muted">0</span></div>
+                <div class="pc">
+                    <div id="active-wall" class="active-wall"></div>
+                </div>
+      </div>
+
+            <div class="panel">
+                <div class="ph"><span>Recent Attacks</span><span id="attack-count" class="muted">0</span></div>
+                <div class="pc">
+                    <table>
+                        <thead><tr><th>Time</th><th>IP</th><th>Type</th><th>Severity</th></tr></thead>
+                        <tbody id="attacks"></tbody>
+                    </table>
+                </div>
       </div>
     </div>
-    <div class="panel">
-      <div class="ph">Recent attacks</div>
-      <div class="pc">
-        <table>
-          <thead><tr><th>Time</th><th>IP</th><th>Type</th><th>Severity</th></tr></thead>
-          <tbody id="attacks"></tbody>
-        </table>
-      </div>
-    </div>
-  </div>
 
-  <div class="panel" style="margin-top:1rem;height:260px;">
-    <div class="ph">Events</div>
-    <div id="events" class="pc events"></div>
-  </div>
+        <div class="panel" style="margin-top:.7rem; min-height: 240px;">
+            <div class="ph"><span>Historical Sessions</span><span id="history-count" class="muted">0</span></div>
+            <div class="pc">
+                <table>
+                    <thead><tr><th>Last Seen</th><th>IP</th><th>Req</th><th>Interactive</th><th>Assets</th><th>Attacks</th><th>Stage</th></tr></thead>
+                    <tbody id="history"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="panel" style="margin-top:.7rem; min-height: 250px;">
+            <div class="ph"><span>Live Event Stream</span><span id="event-count" class="muted">0</span></div>
+            <div id="events" class="pc events"></div>
+        </div>
+    </div>
 
   <script>
-    function t(ts){ try{return new Date(ts).toLocaleTimeString()}catch{return '-'} }
-    function esc(v){ return String(v ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+        function t(ts){ try{ return new Date(ts).toLocaleTimeString(); }catch{ return '-'; } }
+        function esc(v){ return String(v ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+        function ago(sec){
+            const s = Number(sec);
+            if (!Number.isFinite(s) || s < 0) return '-';
+            if (s < 60) return s + 's ago';
+            if (s < 3600) return Math.floor(s / 60) + 'm ago';
+            return Math.floor(s / 3600) + 'h ago';
+        }
 
     async function j(u){
       const r = await fetch(u, { credentials: 'same-origin' });
@@ -437,41 +754,124 @@ DASHBOARD_HTML = """
       return r.json();
     }
 
+        function renderActive(sessions){
+            const wall = document.getElementById('active-wall');
+            document.getElementById('active-count').textContent = sessions.length;
+            if(!sessions.length){
+                wall.innerHTML = '<div class="empty">No active sessions in the last 15 minutes.</div>';
+                return;
+            }
+
+            wall.innerHTML = sessions.map(s => {
+                const actionHtml = (s.recent_actions || []).slice(0, 6).map(a => {
+                    const cls = a.is_asset_request ? 'asset' : '';
+                    const attackInfo = a.attacks > 0 ? (' [' + a.attacks + ' atk]') : '';
+                    return '<div class="act">'
+                        + '<span class="act-left ' + cls + '">' + esc(a.method) + ' ' + esc(a.endpoint) + attackInfo + '</span>'
+                        + '<span class="act-right">' + t(a.timestamp) + ' [' + esc(a.response) + ']</span>'
+                        + '</div>';
+                }).join('') || '<div class="muted">No recent actions captured.</div>';
+
+                const typeHtml = (s.attack_types || []).slice(0, 5).map(v => '<span class="chip">' + esc(v) + '</span>').join('')
+                    || '<span class="chip">none</span>';
+
+                return '<div class="session-card">'
+                    + '<div class="session-head"><span class="mono">' + esc(s.ip) + '</span><span class="stage">' + esc(s.stage) + '</span></div>'
+                    + '<div class="metrics">'
+                    + '<div class="metric">Requests: <b>' + esc(s.requests) + '</b></div>'
+                    + '<div class="metric">Attacks: <b>' + esc(s.attacks) + '</b></div>'
+                    + '<div class="metric">Interactive: <b>' + esc(s.interaction_requests) + '</b></div>'
+                    + '<div class="metric">Assets: <b>' + esc(s.asset_requests) + '</b></div>'
+                    + '</div>'
+                    + '<div class="metrics">'
+                    + '<div class="metric">Last seen: <b>' + esc(ago(s.seconds_since_seen)) + '</b></div>'
+                    + '<div class="metric">Session age: <b>' + esc(ago(s.age_seconds)) + '</b></div>'
+                    + '</div>'
+                    + '<div class="types">' + typeHtml + '</div>'
+                    + '<div class="actions-feed">' + actionHtml + '</div>'
+                    + '</div>';
+            }).join('');
+        }
+
+        function renderHistory(sessions){
+            const h = document.getElementById('history');
+            document.getElementById('history-count').textContent = sessions.length;
+            if(!sessions.length){
+                h.innerHTML = '<tr><td colspan="7" class="empty">No historical sessions yet.</td></tr>';
+                return;
+            }
+            h.innerHTML = sessions.slice(0, 120).map(s =>
+                '<tr>'
+                + '<td>' + esc(t(s.last_seen)) + '</td>'
+                + '<td class="mono">' + esc(s.ip) + '</td>'
+                + '<td>' + esc(s.requests) + '</td>'
+                + '<td>' + esc(s.interaction_requests) + '</td>'
+                + '<td>' + esc(s.asset_requests) + '</td>'
+                + '<td>' + esc(s.attacks) + '</td>'
+                + '<td>' + esc(s.stage) + '</td>'
+                + '</tr>'
+            ).join('');
+        }
+
+        function renderAttacks(attacks){
+            const a = document.getElementById('attacks');
+            document.getElementById('attack-count').textContent = attacks.length;
+            if(!attacks.length){
+                a.innerHTML = '<tr><td colspan="4" class="empty">No attacks detected yet.</td></tr>';
+                return;
+            }
+            a.innerHTML = attacks.slice(0, 120).map(x =>
+                '<tr>'
+                + '<td>' + t(x.timestamp) + '</td>'
+                + '<td class="mono">' + esc(x.ip) + '</td>'
+                + '<td>' + esc(x.type) + '</td>'
+                + '<td class="sev-' + esc(x.severity) + '">' + esc(x.severity) + '</td>'
+                + '</tr>'
+            ).join('');
+        }
+
+        function renderEvents(events){
+            const e = document.getElementById('events');
+            document.getElementById('event-count').textContent = events.length;
+            if(!events.length){
+                e.innerHTML = '<div class="empty">No events captured yet.</div>';
+                return;
+            }
+
+            e.innerHTML = events.slice(0, 220).map(x => {
+                const statusClass = Number(x.response) >= 400 ? 'danger' : 'ok';
+                const assetClass = x.is_asset_request ? 'asset' : '';
+                const attackInfo = x.attacks > 0 ? (' [' + x.attacks + ' atk]') : '';
+                return '<div class="event">'
+                    + '<span class="event-main ' + assetClass + '">' + t(x.timestamp) + ' <span class="muted mono">' + esc(x.ip) + '</span> ' + esc(x.method) + ' ' + esc(x.endpoint) + attackInfo + '</span>'
+                    + '<span class="' + statusClass + '">[' + esc(x.response) + ']</span>'
+                    + '</div>';
+            }).join('');
+        }
+
     async function refresh(){
-      const [stats, sessions, attacks, events] = await Promise.all([j('/api/stats'), j('/api/sessions'), j('/api/attacks'), j('/api/events')]);
-      if(!stats || !sessions || !attacks || !events) return;
+            const [stats, activeSessions, historySessions, attacks, events] = await Promise.all([
+                j('/api/stats'),
+                j('/api/sessions?scope=active'),
+                j('/api/sessions?scope=history'),
+                j('/api/attacks?limit=300'),
+                j('/api/events?limit=800')
+            ]);
+            if(!stats || !activeSessions || !historySessions || !attacks || !events) return;
 
       document.getElementById('s-active').textContent = stats.active_sessions;
       document.getElementById('s-total').textContent = stats.total_sessions;
       document.getElementById('s-req').textContent = stats.total_requests;
       document.getElementById('s-att').textContent = stats.total_attacks;
 
-      const s = document.getElementById('sessions');
-      if(!sessions.length){ s.innerHTML = '<tr><td colspan="5" class="muted">No sessions</td></tr>'; }
-      else {
-        s.innerHTML = sessions.slice(0,50).map(x =>
-          `<tr><td>${esc(x.ip)}</td><td class="stage">${esc(x.stage)}</td><td>${x.requests}</td><td>${x.attacks}</td><td>${t(x.last_seen)}</td></tr>`
-        ).join('');
-      }
-
-      const a = document.getElementById('attacks');
-      if(!attacks.length){ a.innerHTML = '<tr><td colspan="4" class="muted">No attacks</td></tr>'; }
-      else {
-        a.innerHTML = attacks.slice(0,100).map(x =>
-          `<tr><td>${t(x.timestamp)}</td><td>${esc(x.ip)}</td><td>${esc(x.type)}</td><td class="sev-${esc(x.severity)}">${esc(x.severity)}</td></tr>`
-        ).join('');
-      }
-
-      const e = document.getElementById('events');
-      if(!events.length){ e.innerHTML = '<div class="muted">No events</div>'; }
-      else {
-        e.innerHTML = events.slice(0,150).map(x =>
-          `<div class="event">${t(x.timestamp)} <span class="muted">${esc(x.ip)}</span> ${esc(x.method)} ${esc(x.endpoint)} ${x.attacks ? '['+x.attacks+' atk]' : ''} <span class="muted">[${x.response}]</span></div>`
-        ).join('');
-      }
+            renderActive(activeSessions);
+            renderHistory(historySessions);
+            renderAttacks(attacks);
+            renderEvents(events);
     }
+
     refresh();
-    setInterval(refresh, 3000);
+        setInterval(refresh, 3000);
   </script>
 </body>
 </html>
@@ -524,36 +924,42 @@ def api_stats():
 @api_login_required
 def api_sessions():
     with _lock:
-        rows = []
-        for sid, data in _sessions.items():
-            rows.append(
-                {
-                    "id": f"{sid[:16]}...",
-                    "ip": data["ip"],
-                    "first_seen": data["first_seen"],
-                    "last_seen": data["last_seen"],
-                    "requests": data["request_count"],
-                    "attacks": data["attacks_detected"],
-                    "stage": data["stage"],
-                    "attack_types": data["attack_types"],
-                }
-            )
-        rows.sort(key=lambda x: x["last_seen"] or "", reverse=True)
-        return jsonify(rows[:80])
+        scope = request.args.get("scope", "active").strip().lower()
+        if scope not in {"active", "history", "all"}:
+            scope = "active"
+        return jsonify(_session_rows(scope=scope, limit=80))
+
+
+@app.route("/api/sessions/active")
+@api_login_required
+def api_sessions_active():
+    with _lock:
+        return jsonify(_session_rows(scope="active", limit=80))
+
+
+@app.route("/api/sessions/history")
+@api_login_required
+def api_sessions_history():
+    with _lock:
+        return jsonify(_session_rows(scope="history", limit=120))
 
 
 @app.route("/api/attacks")
 @api_login_required
 def api_attacks():
     with _lock:
-        return jsonify(list(reversed(_attacks[-120:])))
+        requested = _safe_int(request.args.get("limit"), 120)
+        limit = max(10, min(requested, 800))
+        return jsonify(list(reversed(_attacks[-limit:])))
 
 
 @app.route("/api/events")
 @api_login_required
 def api_events():
     with _lock:
-        return jsonify(list(reversed(_events[-300:])))
+        requested = _safe_int(request.args.get("limit"), 300)
+        limit = max(20, min(requested, 2000))
+        return jsonify(list(reversed(_events[-limit:])))
 
 
 if __name__ == "__main__":

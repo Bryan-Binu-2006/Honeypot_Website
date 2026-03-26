@@ -128,6 +128,28 @@ def _register_middleware(app: Flask) -> None:
         """
         # Apply security headers
         response = security.apply_headers(response)
+
+        # Persist attacker session in cookie so multiple requests from one browser
+        # are correlated to a single session.
+        if hasattr(g, 'session_id') and g.get('session_id'):
+            from flask import request
+
+            cookie_secure = bool(app.config.get('SESSION_COOKIE_SECURE', True))
+            # Allow localhost HTTP testing while keeping secure cookies in production.
+            if cookie_secure and not request.is_secure:
+                forwarded_proto = request.headers.get('X-Forwarded-Proto', '').lower()
+                host = request.host.split(':', 1)[0].lower()
+                if forwarded_proto != 'https' and host in {'127.0.0.1', 'localhost'}:
+                    cookie_secure = False
+
+            session_manager.set_session_cookie(
+                response,
+                g.get('session_id'),
+                cookie_name=app.config.get('SESSION_COOKIE_NAME', 'sid'),
+                httponly=bool(app.config.get('SESSION_COOKIE_HTTPONLY', True)),
+                secure=cookie_secure,
+                samesite=app.config.get('SESSION_COOKIE_SAMESITE', 'Lax')
+            )
         
         # Queue logging event (async, non-blocking)
         # This uses internal interface - logging details are abstracted
