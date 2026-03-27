@@ -43,9 +43,11 @@ def main():
     flask_env = os.environ.get('FLASK_ENV', 'production').strip().lower()
     is_development = flask_env == 'development' or debug
 
-    # In production/Nginx mode, bind local by default to avoid direct internet exposure.
-    if not is_development and host in {'0.0.0.0', '::'}:
-        host = os.environ.get('UPSTREAM_HOST', '127.0.0.1')
+    # Respect explicit upstream host override when provided.
+    # Otherwise, bind using HOST as configured in .env.
+    upstream_host = os.environ.get('UPSTREAM_HOST', '').strip()
+    if upstream_host:
+        host = upstream_host
 
     use_flask_dev_server = _env_bool('USE_FLASK_DEV_SERVER', is_development)
     waitress_threads = int(os.environ.get('WAITRESS_THREADS', '8'))

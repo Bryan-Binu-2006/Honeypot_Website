@@ -63,6 +63,17 @@ OPERATOR_GROUP_ACTIVE_BY_IP = os.environ.get("OPERATOR_GROUP_ACTIVE_BY_IP", "1")
     "0", "false", "no"
 }
 
+# Keep operator dashboard local-only by default for safety.
+_ALLOW_REMOTE_OPERATOR = os.environ.get("ALLOW_REMOTE_OPERATOR", "0").strip().lower() in {
+    "1", "true", "yes", "on"
+}
+if not _ALLOW_REMOTE_OPERATOR and OPERATOR_HOST not in {"127.0.0.1", "localhost", "::1"}:
+    print(
+        "[operator] OPERATOR_HOST is not local but remote operator access is disabled. "
+        "Forcing OPERATOR_HOST=127.0.0.1"
+    )
+    OPERATOR_HOST = "127.0.0.1"
+
 if OPERATOR_PASSWORD_HASH:
     _PASSWORD_HASH = OPERATOR_PASSWORD_HASH
 else:

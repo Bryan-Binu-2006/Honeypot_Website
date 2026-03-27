@@ -71,23 +71,17 @@ class HoneypotLauncher:
     def start_web_app(self) -> subprocess.Popen:
         """Start the Flask web application."""
         print("[*] Starting web application...")
-        
-        if self.production:
-            # Use gunicorn for production
-            cmd = [
-                'gunicorn',
-                '-w', '4',
-                '-b', '0.0.0.0:5000',
-                '--access-logfile', '-',
-                '--error-logfile', '-',
-                'app:create_app()'
-            ]
-        else:
-            # Development mode
-            cmd = [sys.executable, str(PROJECT_ROOT / 'run.py')]
+
+        # Use run.py for both modes so startup path is consistent.
+        cmd = [sys.executable, str(PROJECT_ROOT / 'run.py')]
         
         env = os.environ.copy()
-        if not self.production:
+        if self.production:
+            env['FLASK_ENV'] = 'production'
+            env['FLASK_DEBUG'] = '0'
+            env['HOST'] = env.get('HOST', '127.0.0.1')
+            env['PORT'] = env.get('PORT', '5000')
+        else:
             env['FLASK_ENV'] = 'development'
             env['FLASK_DEBUG'] = '1'
         
@@ -165,7 +159,10 @@ class HoneypotLauncher:
         self.start_web_app()
         
         print("\n[+] All components started successfully!")
-        print(f"[*] Web application: http://localhost:5000")
+        if self.production:
+            print("[*] Web application upstream: http://127.0.0.1:5000 (expected behind nginx)")
+        else:
+            print("[*] Web application: http://localhost:5000")
         print("[*] Press Ctrl+C to stop\n")
         
         # Monitor processes
