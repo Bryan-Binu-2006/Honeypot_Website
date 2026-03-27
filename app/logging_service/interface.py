@@ -237,6 +237,9 @@ class LoggingInterface:
                 'attacker_skill_level': analysis.get('attacker_skill_level', 'basic'),
                 'chain_attack_path': analysis.get('chain_attack_path', []),
                 'chain_next_hints': analysis.get('chain_next_hints', []),
+                'authenticated_username': analysis.get('authenticated_username', ''),
+                'authenticated_role': analysis.get('authenticated_role', 'anonymous'),
+                'authenticated_service_tier': analysis.get('authenticated_service_tier', ''),
             })
         )
     
@@ -361,7 +364,10 @@ def _write_to_operator_log(session_id: str, analysis: Dict[str, Any], response_c
             'attacker_skill_level': analysis.get('attacker_skill_level', 'basic'),
             'time_spent_seconds': analysis.get('time_spent_seconds', 0),
             'techniques_used': analysis.get('techniques_used', []),
-            'detection_stage_indicator': analysis.get('detection_stage_indicator', 'recon')
+            'detection_stage_indicator': analysis.get('detection_stage_indicator', 'recon'),
+            'authenticated_username': analysis.get('authenticated_username', ''),
+            'authenticated_role': analysis.get('authenticated_role', 'anonymous'),
+            'authenticated_service_tier': analysis.get('authenticated_service_tier', ''),
         }
         
         with open(log_file, 'a') as f:

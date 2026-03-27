@@ -10,7 +10,7 @@ INTERNAL DOCUMENTATION:
 - Fake sensitive data encourages deeper exploration
 """
 
-from flask import Blueprint, render_template, request, jsonify, g, redirect, url_for
+from flask import Blueprint, render_template, request, jsonify, g, redirect, url_for, session
 import json
 import time
 import random
@@ -18,6 +18,15 @@ import string
 
 
 admin_bp = Blueprint('admin', __name__)
+
+_ADMIN_USERNAME = 'admin'
+_ADMIN_PASSWORD = 'SuperSecureAdmin!2026'
+
+
+def _looks_like_sqli(value: str) -> bool:
+    lowered = str(value or '').lower()
+    markers = ["' or '", ' or 1=1', 'union select', '--', '/*', 'sleep(', 'benchmark(', 'drop table']
+    return any(marker in lowered for marker in markers)
 
 
 # Fake admin data
@@ -34,6 +43,67 @@ FAKE_API_KEYS = [
     {'id': 'key_2', 'name': 'Staging API', 'key': 'cs_stag_' + ''.join(random.choices(string.ascii_letters + string.digits, k=32)), 'created': '2024-02-20', 'last_used': '2024-03-10'},
     {'id': 'key_3', 'name': 'Development API', 'key': 'cs_dev_' + ''.join(random.choices(string.ascii_letters + string.digits, k=32)), 'created': '2024-03-01', 'last_used': '2024-03-14'},
 ]
+
+
+@admin_bp.before_request
+def require_admin_login():
+    """Require admin authentication for all admin routes except login."""
+    allowed = {'admin.admin_login', 'admin.admin_logout'}
+    if request.endpoint in allowed:
+        return None
+    if request.path.rstrip('/') == '/admin/login':
+        return None
+
+    if not session.get('admin_authenticated'):
+        return redirect(url_for('admin.admin_login', next=request.path))
+    return None
+
+
+@admin_bp.route('/login', methods=['GET', 'POST'])
+def admin_login():
+    """Admin login page. SQLi attempts intentionally grant access for honeypot realism."""
+    if request.method == 'GET':
+        return render_template('admin/login.html')
+
+    username = request.form.get('username', '').strip()
+    password = request.form.get('password', '')
+
+    if request.is_json:
+        payload = request.get_json(silent=True) or {}
+        username = str(payload.get('username', username)).strip()
+        password = str(payload.get('password', password))
+
+    detected_attacks = g.get('detected_attacks', [])
+    sqli_detected = any(str(a.get('type', '')).startswith('sqli') for a in detected_attacks if isinstance(a, dict))
+    if not sqli_detected:
+        sqli_detected = _looks_like_sqli(username) or _looks_like_sqli(password)
+
+    credential_match = (
+        username.lower() == _ADMIN_USERNAME.lower()
+        and password == _ADMIN_PASSWORD
+    )
+
+    if sqli_detected or credential_match:
+        session['admin_authenticated'] = True
+        session['admin_username'] = username or 'admin'
+        next_url = request.args.get('next', '/admin/dashboard')
+        if not str(next_url).startswith('/admin'):
+            next_url = '/admin/dashboard'
+        return redirect(next_url)
+
+    return render_template(
+        'admin/login.html',
+        error='Invalid credentials',
+        username=username,
+    ), 401
+
+
+@admin_bp.route('/logout')
+def admin_logout():
+    """Admin logout endpoint."""
+    session.pop('admin_authenticated', None)
+    session.pop('admin_username', None)
+    return redirect(url_for('admin.admin_login'))
 
 
 @admin_bp.route('/')

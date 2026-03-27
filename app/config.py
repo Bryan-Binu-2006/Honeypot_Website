@@ -15,6 +15,13 @@ from typing import Optional
 from functools import lru_cache
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return str(raw).strip().lower() in {'1', 'true', 'yes', 'on'}
+
+
 class Config:
     """
     Base configuration class with secure defaults.
@@ -32,8 +39,17 @@ class Config:
     SESSION_SECRET: str = os.environ.get('SESSION_SECRET', 'session-secret-change-me')
     SESSION_COOKIE_NAME: str = 'sid'
     SESSION_COOKIE_HTTPONLY: bool = True
-    SESSION_COOKIE_SECURE: bool = True
+    SESSION_COOKIE_SECURE: bool = _env_bool('SESSION_COOKIE_SECURE', True)
     SESSION_COOKIE_SAMESITE: str = 'Lax'
+
+    # HTTPS / reverse proxy deployment controls
+    FORCE_HTTPS: bool = _env_bool('FORCE_HTTPS', False)
+    PREFERRED_URL_SCHEME: str = os.environ.get('PREFERRED_URL_SCHEME', 'https')
+    PROXY_FIX_ENABLED: bool = _env_bool('PROXY_FIX_ENABLED', True)
+    PROXY_FIX_X_FOR: int = int(os.environ.get('PROXY_FIX_X_FOR', '1'))
+    PROXY_FIX_X_PROTO: int = int(os.environ.get('PROXY_FIX_X_PROTO', '1'))
+    PROXY_FIX_X_HOST: int = int(os.environ.get('PROXY_FIX_X_HOST', '1'))
+    PROXY_FIX_X_PORT: int = int(os.environ.get('PROXY_FIX_X_PORT', '1'))
     
     # Database - Main application (read-only access to necessary tables)
     # IMPORTANT: This should NOT have access to logging tables
@@ -70,6 +86,7 @@ class DevelopmentConfig(Config):
     """Development configuration - NEVER use in production."""
     DEBUG = True
     SESSION_COOKIE_SECURE = False  # Allow HTTP in dev
+    FORCE_HTTPS = False
 
 
 class ProductionConfig(Config):

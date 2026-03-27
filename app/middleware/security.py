@@ -11,6 +11,7 @@ INTERNAL DOCUMENTATION:
 
 from flask import Response, request
 from typing import Dict, Any
+import os
 
 
 class SecurityMiddleware:
@@ -48,6 +49,8 @@ class SecurityMiddleware:
         'Server': 'nginx/1.18.0 (Ubuntu)',
         'X-Powered-By': 'PHP/7.4.3',  # Misleading
     }
+
+    ENABLE_HSTS = str(os.environ.get('ENABLE_HSTS', '1')).strip().lower() in {'1', 'true', 'yes', 'on'}
     
     def __init__(self):
         """Initialize security middleware."""
@@ -86,6 +89,11 @@ class SecurityMiddleware:
                 "font-src 'self'; "
                 "connect-src 'self'"
             )
+
+        if self.ENABLE_HSTS:
+            forwarded_proto = request.headers.get('X-Forwarded-Proto', '').lower()
+            if request.is_secure or forwarded_proto == 'https':
+                response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
         
         return response
     

@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+
+{% block title %}Admin Access - CyberShield{% endblock %}
+
+{% block content %}
+<style>
+    .admin-login-wrap {
+        max-width: 480px;
+        margin: 5rem auto 0;
+    }
+
+    .admin-login-card {
+        border: 1px solid rgba(53, 141, 201, 0.35);
+        background: linear-gradient(180deg, rgba(10, 20, 36, 0.88), rgba(10, 15, 27, 0.88));
+        border-radius: 18px;
+        padding: 1.35rem;
+        box-shadow: 0 24px 50px rgba(0, 0, 0, 0.35);
+    }
+
+    .admin-kicker {
+        color: #9dc6df;
+        font-size: 0.74rem;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        margin-bottom: 0.5rem;
+    }
+
+    .admin-title {
+        font-size: 1.65rem;
+        color: #dbecff;
+        margin-bottom: 0.35rem;
+    }
+
+    .admin-sub {
+        color: #8ca6bf;
+        font-size: 0.92rem;
+        margin-bottom: 1rem;
+    }
+
+    .admin-hint {
+        border: 1px dashed rgba(78, 156, 209, 0.45);
+        border-radius: 10px;
+        padding: 0.65rem 0.75rem;
+        color: #a7cee6;
+        background: rgba(14, 40, 62, 0.28);
+        font-size: 0.8rem;
+        margin-bottom: 1rem;
+    }
+
+    .admin-alert {
+        border: 1px solid rgba(236, 81, 81, 0.65);
+        border-radius: 10px;
+        background: rgba(236, 81, 81, 0.12);
+        color: #ffc7c7;
+        padding: 0.65rem 0.75rem;
+        margin-bottom: 1rem;
+        font-size: 0.9rem;
+    }
+
+    .admin-row {
+        display: grid;
+        gap: 0.35rem;
+        margin-bottom: 0.8rem;
+    }
+
+    .admin-label {
+        color: #95b4d1;
+        font-size: 0.8rem;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+    }
+
+    .admin-actions {
+        display: flex;
+        gap: 0.6rem;
+        align-items: center;
+    }
+
+    .admin-actions .btn {
+        width: 100%;
+    }
+
+    .admin-foot {
+        margin-top: 0.9rem;
+        color: #7892ab;
+        font-size: 0.77rem;
+        text-align: center;
+    }
+</style>
+
+<div class="admin-login-wrap">
+    <div class="admin-login-card">
+        <div class="admin-kicker">Restricted Console</div>
+        <h1 class="admin-title">Admin Control Access</h1>
+        <p class="admin-sub">Authenticate to continue into operational management surfaces.</p>
+
+        <div class="admin-hint">Internal note: authentication telemetry and payload fingerprints are monitored.</div>
+
+        {% if error %}
+        <div class="admin-alert">{{ error }}</div>
+        {% endif %}
+
+        <form method="POST" action="/admin/login{% if request.args.get('next') %}?next={{ request.args.get('next') }}{% endif %}">
+            <div class="admin-row">
+                <label for="username" class="admin-label">Username</label>
+                <input id="username" name="username" type="text" value="{{ username or '' }}" required placeholder="admin" />
+            </div>
+            <div class="admin-row">
+                <label for="password" class="admin-label">Password</label>
+                <input id="password" name="password" type="password" required placeholder="Enter your password" />
+            </div>
+            <div class="admin-actions">
+                <button type="submit" class="btn btn-primary">Sign In</button>
+            </div>
+        </form>
+
+        <div class="admin-foot">Session fingerprinting and anomaly scoring enabled</div>
+    </div>
+</div>
+{% endblock %}

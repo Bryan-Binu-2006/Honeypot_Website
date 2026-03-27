@@ -54,7 +54,7 @@ A sophisticated cybersecurity honeypot web application that simulates a realisti
 │     - Detection engine + stage inference                                │
 │                                                                         │
 │  route handler                                                          │
-│  3) Public/Admin/API/Files/Terminal deception responses                 │
+│  3) Public/Admin/API/Files/Internal deception responses                 │
 │                                                                         │
 │  after_request                                                          │
 │  4) Security headers + persist sid cookie                               │
@@ -92,12 +92,12 @@ A sophisticated cybersecurity honeypot web application that simulates a realisti
 
 - **Homepage** - Professional CyberShield branding
 - **Login Page** - SQLi detection, fake success on attack
+- **Customer Service Portal** - Real credential flow for believable premium dashboard (`/service/intelligence`)
 - **Admin Panel** - Fake dashboard (accessible after "successful" login)
   - User management (IDOR target)
   - API key management
   - Crypto wallet simulation
   - File explorer (LFI simulation)
-  - Web terminal
   - Debug console
 - **Public Endpoints**
   - `/robots.txt` - Exposes "hidden" paths
@@ -348,6 +348,26 @@ Access: http://127.0.0.1:5001
 
 **Note:** Operator dashboard reads logs from `data/operatordata.jsonl`. On Render, this file doesn't persist between restarts. To fix this, upgrade to PostgreSQL database (see Configuration section).
 
+### VM + Domain + HTTPS (Nginx)
+
+For a VM deployment with your own domain:
+
+1. Point your A record to the VM public IP.
+2. Run the Flask app behind localhost (for example with gunicorn on `127.0.0.1:5000`).
+3. Copy [nginx/honeypot.conf](nginx/honeypot.conf), replace `honeypot.example.com` with your real domain, then enable the site.
+4. Issue a TLS certificate (Certbot expected paths are already in the Nginx config):
+   - `/etc/letsencrypt/live/<your-domain>/fullchain.pem`
+   - `/etc/letsencrypt/live/<your-domain>/privkey.pem`
+5. Set env vars in `.env`:
+   - `FORCE_HTTPS=1`
+   - `PROXY_FIX_ENABLED=1`
+   - `PROXY_FIX_X_FOR=1`
+   - `PROXY_FIX_X_PROTO=1`
+   - `SESSION_COOKIE_SECURE=1`
+6. Restart Flask and Nginx.
+
+This enables correct HTTPS redirects, secure cookies, and trusted proxy headers for IP/protocol handling.
+
 ---
 
 ## ⚙️ Configuration
@@ -360,8 +380,16 @@ Access: http://127.0.0.1:5001
 | `FLASK_DEBUG` | Debug mode (always 0 in prod) | `0` | ✓ |
 | `SECRET_KEY` | Flask secret key (32+ chars) | Random string | ✓ |
 | `SESSION_SECRET` | Session HMAC key (32+ chars) | Random string | ✓ |
+| `SESSION_COOKIE_SECURE` | Secure cookie flag for sid cookie | `1` | ✗ |
 | `HOST` | Bind address | `0.0.0.0` or `127.0.0.1` | ✗ |
 | `PORT` | Port number | `5000` | ✗ |
+| `FORCE_HTTPS` | Redirect HTTP to HTTPS (non-localhost) | `1` | ✗ |
+| `PREFERRED_URL_SCHEME` | URL scheme in generated links | `https` | ✗ |
+| `PROXY_FIX_ENABLED` | Trust reverse proxy headers | `1` | ✗ |
+| `PROXY_FIX_X_FOR` | Trusted `X-Forwarded-For` hops | `1` | ✗ |
+| `PROXY_FIX_X_PROTO` | Trusted `X-Forwarded-Proto` hops | `1` | ✗ |
+| `PROXY_FIX_X_HOST` | Trusted `X-Forwarded-Host` hops | `1` | ✗ |
+| `PROXY_FIX_X_PORT` | Trusted `X-Forwarded-Port` hops | `1` | ✗ |
 | `OPERATOR_USERNAME` | Operator login username | `operator_admin` | ✓ |
 | `OPERATOR_PASSWORD` | Operator dashboard password | Strong password | ✓ |
 | `OPERATOR_PASSWORD_HASH` | Optional pre-hashed password | PBKDF2 hash | ✗ |
@@ -369,6 +397,10 @@ Access: http://127.0.0.1:5001
 | `OPERATOR_HOST` | Operator bind host | `127.0.0.1` | ✓ |
 | `OPERATOR_PORT` | Operator bind port | `5001` | ✓ |
 | `OPERATOR_ACTIVE_WINDOW_MINUTES` | Active session lookback window | `15` | ✗ |
+| `OPERATOR_GROUP_ACTIVE_BY_IP` | Collapse active cards by canonical IP | `1` | ✗ |
+| `CUSTOMER_PASSWORD_NINA` | Demo customer password override | `ClientPortal!2026` | ✗ |
+| `CUSTOMER_PASSWORD_LIAM` | Demo customer password override | `ClientPortal!2026` | ✗ |
+| `CUSTOMER_PASSWORD_MAYA` | Demo customer password override | `ClientPortal!2026` | ✗ |
 | `DATABASE_URL` | PostgreSQL connection (optional) | `postgresql://...` | ✗ |
 | `REDIS_URL` | Redis connection (optional) | `redis://localhost:6379` | ✗ |
 
@@ -405,7 +437,7 @@ Honeypot_Website/
 │   │   ├── admin.py             # Admin panel (fake)
 │   │   ├── api.py               # Internal APIs (fake)
 │   │   ├── files.py             # File explorer (LFI simulation)
-│   │   └── terminal.py          # Web terminal (command injection simulation)
+│   │   └── internal.py          # Fake internal infra endpoints
 │   │
 │   ├── detection/               # Attack detection engine
 │   │   ├── patterns.py          # 30+ attack pattern definitions
@@ -454,7 +486,7 @@ Honeypot_Website/
 │       ├── contact.html        # Contact form
 │       ├── about.html          # About page
 │       ├── forgot_password.html # Password reset
-│       ├── terminal.html       # Web terminal
+│       ├── service_intelligence.html # Customer premium dashboard
 │       ├── admin/              # Admin panel templates
 │       │   ├── dashboard.html
 │       │   ├── users.html
@@ -496,6 +528,9 @@ Honeypot_Website/
 |--------|----------|-------------|
 | GET | `/` | Homepage |
 | GET/POST | `/login` | Login page (SQLi target) |
+| GET | `/logout` | Customer logout |
+| GET | `/service/intelligence` | Authenticated customer service dashboard |
+| GET | `/service/intelligence/data` | Customer service metrics refresh |
 | GET/POST | `/signup` | Signup page |
 | GET/POST | `/forgot-password` | Password reset |
 | GET/POST | `/contact` | Contact form (XSS target) |
@@ -550,16 +585,6 @@ Honeypot_Website/
 | GET | `/files/download?path=` | File download simulation (`id=` also accepted) |
 | POST | `/files/upload` | Upload simulation |
 
-### Terminal Endpoints (Honeypot - Port 5000)
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/terminal` | Web terminal page |
-| POST | `/terminal/exec` | Command execution (simulated) |
-| POST | `/terminal/api/exec` | API-style command execution |
-| GET/POST | `/terminal/shell` | Shell-style command endpoint |
-| GET | `/terminal/history` | Command history simulation |
-
 ### Operator Dashboard Endpoints (Port 5001)
 
 | Method | Endpoint | Description |
@@ -598,7 +623,7 @@ Credentials from `.env` → `OPERATOR_USERNAME` + `OPERATOR_PASSWORD`
 
 **Sessions Panel:**
 - Active users shown as live cards
-- IP + stage + request and attack counts
+- IP + authenticated identity (username/role/tier) + stage
 - Asset vs interactive request split
 - Recent per-session action feed
 

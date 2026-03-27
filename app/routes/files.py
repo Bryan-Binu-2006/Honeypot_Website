@@ -302,9 +302,7 @@ def file_read():
 
     # Chain simulation: uploaded polyglot payload executed via read endpoint.
     if normalized in _UPLOADED_PAYLOADS:
-        payload_meta = _UPLOADED_PAYLOADS[normalized]
         cmd = request.args.get('cmd', 'id')
-        unlock_token = payload_meta.get('unlock_token', 'unlock-missing')
         return jsonify({
             'status': 'success',
             'execution': 'simulated',
@@ -313,11 +311,11 @@ def file_read():
             'output': [
                 'uid=33(www-data) gid=33(www-data) groups=33(www-data)',
                 'sudo: session opened for user root by www-data(uid=33)',
-                'pivot hint: /terminal/unlocked?token=' + unlock_token,
+                'pivot hint: /internal/logs/lateral',
             ],
             'next': [
-                f'/terminal/unlocked?token={unlock_token}',
-                '/internal/logs/lateral'
+                '/internal/logs/lateral',
+                '/internal/db?table=employees'
             ]
         })
     
@@ -346,12 +344,10 @@ def file_upload():
 
     upload_path = f'/uploads/2024/03/{filename}'
     looks_polyglot = '.php' in filename.lower() and any(ext in filename.lower() for ext in ['.jpg', '.png', '.gif'])
-    unlock_token = f"unlock-{abs(hash(str(g.get('session_id', 'anon')) + filename)) % 999999:06d}"
 
     if looks_polyglot:
         _UPLOADED_PAYLOADS[upload_path] = {
             'session_id': str(g.get('session_id', 'unknown')),
-            'unlock_token': unlock_token,
             'created': str(time.time())
         }
     
@@ -371,7 +367,7 @@ def file_upload():
         },
         'next': [
             f'/files/read?path={upload_path}&cmd=id',
-            f'/terminal/unlocked?token={unlock_token}'
+            '/internal/logs/lateral'
         ]
     })
 

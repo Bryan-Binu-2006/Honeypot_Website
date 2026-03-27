@@ -1,0 +1,191 @@
+{% extends "base.html" %}
+
+{% block title %}Managed Exposure Intelligence - CyberShield{% endblock %}
+
+{% block content %}
+<style>
+    .svc-wrap {
+        display: grid;
+        gap: 0.9rem;
+    }
+
+    .svc-head {
+        border: 1px solid rgba(65, 102, 132, 0.55);
+        border-radius: 14px;
+        padding: 1rem;
+        background: linear-gradient(170deg, rgba(12, 27, 45, 0.9), rgba(9, 18, 30, 0.9));
+    }
+
+    .svc-kicker {
+        color: #9dc2dc;
+        font-size: 0.74rem;
+        letter-spacing: 0.11em;
+        text-transform: uppercase;
+    }
+
+    .svc-title {
+        color: #d6eafe;
+        font-size: clamp(1.35rem, 2.6vw, 2.1rem);
+        margin: 0.28rem 0;
+    }
+
+    .svc-sub {
+        color: #95aec4;
+        font-size: 0.92rem;
+    }
+
+    .svc-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 0.65rem;
+    }
+
+    .svc-stat {
+        border: 1px solid rgba(57, 87, 114, 0.55);
+        border-radius: 12px;
+        padding: 0.8rem;
+        background: rgba(10, 20, 33, 0.76);
+    }
+
+    .svc-stat .v {
+        color: #79ebce;
+        font-size: 1.55rem;
+        font-weight: 700;
+    }
+
+    .svc-stat .l {
+        color: #8ea9c0;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        font-size: 0.72rem;
+    }
+
+    .svc-main {
+        display: grid;
+        grid-template-columns: 1.1fr 0.9fr;
+        gap: 0.8rem;
+    }
+
+    .svc-card {
+        border: 1px solid rgba(58, 91, 121, 0.55);
+        border-radius: 12px;
+        padding: 0.82rem;
+        background: rgba(10, 18, 30, 0.8);
+    }
+
+    .svc-card h3 {
+        color: #a9daf5;
+        font-size: 0.9rem;
+        margin-bottom: 0.55rem;
+    }
+
+    .svc-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 0.8rem;
+        border-bottom: 1px solid rgba(50, 79, 104, 0.45);
+        padding: 0.34rem 0;
+        color: #b7cfe1;
+        font-size: 0.84rem;
+    }
+
+    .svc-row:last-child {
+        border-bottom: none;
+    }
+
+    .risk-low { color: #86ebb7; }
+    .risk-medium { color: #ffd592; }
+    .risk-high { color: #ff9aa7; }
+
+    .notice {
+        border: 1px solid rgba(68, 101, 131, 0.45);
+        border-radius: 9px;
+        padding: 0.5rem 0.58rem;
+        margin-bottom: 0.45rem;
+        color: #abc6da;
+        background: rgba(10, 23, 35, 0.7);
+        font-size: 0.82rem;
+    }
+
+    @media (max-width: 980px) {
+        .svc-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .svc-main { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 640px) {
+        .svc-grid { grid-template-columns: 1fr; }
+    }
+</style>
+
+<section class="svc-wrap">
+    <div class="svc-head">
+        <div class="svc-kicker">Premium Customer Service</div>
+        <h1 class="svc-title">Managed Exposure Intelligence</h1>
+        <p class="svc-sub">{{ service.display_name }} · {{ service.company }} · Plan: {{ service.tier }}</p>
+    </div>
+
+    <div class="svc-grid">
+        <div class="svc-stat"><div id="s-exposure" class="v">{{ service.exposure_score }}</div><div class="l">Exposure Score</div></div>
+        <div class="svc-stat"><div id="s-blocked" class="v">{{ service.blocked_attempts_24h }}</div><div class="l">Blocked Attempts (24h)</div></div>
+        <div class="svc-stat"><div id="s-unresolved" class="v">{{ service.unresolved_findings }}</div><div class="l">Unresolved Findings</div></div>
+        <div class="svc-stat"><div id="s-uptime" class="v">{{ service.policy_uptime }}</div><div class="l">Policy Uptime</div></div>
+    </div>
+
+    <div class="svc-main">
+        <div class="svc-card">
+            <h3>Protected Workload Risk Breakdown</h3>
+            <div id="workloads">
+                {% for w in service.workload_risk %}
+                <div class="svc-row"><span>{{ w.name }}</span><span class="risk-{{ w.risk }}">{{ w.risk|upper }}</span></div>
+                {% endfor %}
+            </div>
+        </div>
+        <div class="svc-card">
+            <h3>Advisor Notices</h3>
+            <div id="notices">
+                {% for n in service.recent_notices %}
+                <div class="notice">{{ n }}</div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</section>
+
+<script>
+(() => {
+    function esc(v){ return String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#x27;'}[c])); }
+
+    function paint(data){
+        document.getElementById('s-exposure').textContent = data.exposure_score;
+        document.getElementById('s-blocked').textContent = data.blocked_attempts_24h;
+        document.getElementById('s-unresolved').textContent = data.unresolved_findings;
+        document.getElementById('s-uptime').textContent = data.policy_uptime;
+
+        document.getElementById('workloads').innerHTML = (data.workload_risk || []).map(w =>
+            '<div class="svc-row"><span>' + esc(w.name) + '</span><span class="risk-' + esc(w.risk) + '">' + esc(String(w.risk).toUpperCase()) + '</span></div>'
+        ).join('');
+
+        document.getElementById('notices').innerHTML = (data.recent_notices || []).map(n =>
+            '<div class="notice">' + esc(n) + '</div>'
+        ).join('');
+    }
+
+    async function refresh(){
+        try {
+            const r = await fetch('/service/intelligence/data', {credentials: 'same-origin'});
+            if (r.status === 401 || r.status === 302) {
+                window.location = '/login';
+                return;
+            }
+            const data = await r.json();
+            paint(data);
+        } catch (_) {
+            // Keep current values if refresh fails.
+        }
+    }
+
+    setInterval(refresh, 8000);
+})();
+</script>
+{% endblock %}

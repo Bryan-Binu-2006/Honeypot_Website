@@ -199,7 +199,7 @@ class DetectionEngine:
             return 'access'
         if any(p in url for p in ['/admin', '/api/internal', '/debug']):
             return 'exploit'
-        if any(p in url for p in ['/terminal', '/admin/config', '/admin/users']):
+        if any(p in url for p in ['/internal', '/admin/config', '/admin/users']):
             return 'escalate'
         if any(p in url for p in ['/admin/keys', '/admin/wallet', '/api/keys']):
             return 'persist'

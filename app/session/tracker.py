@@ -51,11 +51,11 @@ class SessionTracker:
         ],
         'exploit': [
             '/api/internal', '/debug', '/files', '/api/users',
-            '/api/config', '/admin/api', '/terminal'
+            '/api/config', '/admin/api', '/internal'
         ],
         'escalate': [
             '/admin/config', '/admin/users', '/api/admin',
-            '/terminal/exec', '/admin/database'
+            '/internal/logs', '/admin/database'
         ],
         'persist': [
             '/admin/keys', '/admin/wallet', '/api/keys',

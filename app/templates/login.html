@@ -3,40 +3,115 @@
 {% block title %}Login - CyberShield{% endblock %}
 
 {% block content %}
-<div style="max-width: 400px; margin: 4rem auto;">
-    <div class="card">
-        <h2 style="text-align: center; margin-bottom: 2rem;">Sign In</h2>
-        
+<style>
+    .auth-grid {
+        max-width: 920px;
+        margin: 2rem auto;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.95rem;
+    }
+
+    .auth-panel {
+        border: 1px solid rgba(67, 99, 128, 0.55);
+        border-radius: 14px;
+        background: linear-gradient(160deg, rgba(10, 20, 33, 0.88), rgba(10, 16, 26, 0.88));
+        padding: 1.1rem;
+    }
+
+    .auth-title {
+        font-size: 1.45rem;
+        color: #cfe7ff;
+        margin-bottom: 0.4rem;
+    }
+
+    .auth-sub {
+        color: #90aac0;
+        margin-bottom: 0.9rem;
+    }
+
+    .auth-alert {
+        background: rgba(235, 96, 96, 0.16);
+        border: 1px solid rgba(235, 96, 96, 0.5);
+        padding: 0.65rem;
+        border-radius: 10px;
+        margin-bottom: 0.7rem;
+        color: #ffc5c5;
+        font-size: 0.9rem;
+    }
+
+    .auth-meta {
+        display: grid;
+        gap: 0.5rem;
+    }
+
+    .meta-item {
+        border: 1px solid rgba(72, 106, 132, 0.45);
+        border-radius: 10px;
+        padding: 0.65rem;
+        background: rgba(11, 22, 35, 0.72);
+    }
+
+    .meta-item b {
+        display: block;
+        color: #9edcf6;
+        margin-bottom: 0.22rem;
+        font-size: 0.82rem;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+    }
+
+    .meta-item span {
+        color: #92abc2;
+        font-size: 0.86rem;
+    }
+
+    @media (max-width: 860px) {
+        .auth-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>
+
+<div class="auth-grid">
+    <div class="auth-panel">
+        <h2 class="auth-title">Platform Sign In</h2>
+        <p class="auth-sub">Access asset intelligence, incident workflows, and operational audit trails.</p>
+
         {% if error %}
-        <div style="background: rgba(220, 53, 69, 0.2); border: 1px solid #dc3545; padding: 1rem; border-radius: 5px; margin-bottom: 1rem; color: #dc3545;">
-            {{ error }}
-        </div>
+        <div class="auth-alert">{{ error }}</div>
         {% endif %}
-        
+
         <form method="POST" action="/login">
-            <div>
-                <label for="username" style="display: block; margin-bottom: 0.5rem; color: #999;">Username or Email</label>
-                <input type="text" id="username" name="username" required placeholder="Enter your username">
-            </div>
-            
-            <div>
-                <label for="password" style="display: block; margin-bottom: 0.5rem; color: #999;">Password</label>
-                <input type="password" id="password" name="password" required placeholder="Enter your password">
-            </div>
-            
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-                <label style="display: flex; align-items: center; color: #999; cursor: pointer;">
-                    <input type="checkbox" name="remember" style="width: auto; margin-right: 0.5rem;">
-                    Remember me
+            <label for="username" style="display: block; margin-bottom: 0.38rem; color: #9ab4cc; font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.04em;">Username or Email</label>
+            <input type="text" id="username" name="username" required placeholder="ops.analyst@cybershield.local">
+
+            <label for="password" style="display: block; margin-bottom: 0.38rem; color: #9ab4cc; font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.04em;">Password</label>
+            <input type="password" id="password" name="password" required placeholder="Enter your password">
+
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.7rem;">
+                <label style="display: flex; align-items: center; color: #9bb2c9; cursor: pointer; font-size: 0.9rem;">
+                    <input type="checkbox" name="remember" style="width: auto; margin-right: 0.45rem;">
+                    Remember session
                 </label>
-                <a href="/forgot-password" style="color: #00d4ff; text-decoration: none; font-size: 0.9rem;">Forgot password?</a>
+                <a href="/forgot-password" style="color: #83dcfb; text-decoration: none; font-size: 0.84rem;">Forgot password?</a>
             </div>
-            
+
             <button type="submit" class="btn btn-primary" style="width: 100%;">Sign In</button>
         </form>
-        
-        <div style="text-align: center; margin-top: 2rem; color: #999;">
-            Don't have an account? <a href="/signup" style="color: #00d4ff; text-decoration: none;">Sign up</a>
+
+        <div style="text-align: center; margin-top: 1rem; color: #8ea7bc; font-size: 0.9rem;">
+            New to CyberShield? <a href="/signup" style="color: #8fe4ff; text-decoration: none;">Create account</a>
+        </div>
+    </div>
+
+    <div class="auth-panel">
+        <h3 style="color: #afe3ff; margin-bottom: 0.7rem;">Trust and Operations</h3>
+        <div class="auth-meta">
+            <div class="meta-item"><b>Identity Controls</b><span>Adaptive verification and session policy checks per sign-in.</span></div>
+            <div class="meta-item"><b>Audit Streams</b><span>Access events are correlated with endpoint and behavior telemetry.</span></div>
+            <div class="meta-item"><b>Resilience</b><span>Regional failover and immutable event retention for investigations.</span></div>
+            <div class="meta-item"><b>Compliance Footprint</b><span>SOC 2 mapped controls and configurable risk evidence exports.</span></div>
         </div>
     </div>
 </div>

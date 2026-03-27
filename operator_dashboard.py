@@ -59,6 +59,9 @@ OPERATOR_SESSION_TIMEOUT_MINUTES = int(os.environ.get("OPERATOR_SESSION_TIMEOUT_
 OPERATOR_FAILED_LOGIN_LIMIT = int(os.environ.get("OPERATOR_FAILED_LOGIN_LIMIT", "5"))
 OPERATOR_LOCKOUT_SECONDS = int(os.environ.get("OPERATOR_LOCKOUT_SECONDS", "300"))
 OPERATOR_ACTIVE_WINDOW_MINUTES = int(os.environ.get("OPERATOR_ACTIVE_WINDOW_MINUTES", "15"))
+OPERATOR_GROUP_ACTIVE_BY_IP = os.environ.get("OPERATOR_GROUP_ACTIVE_BY_IP", "1").strip().lower() not in {
+    "0", "false", "no"
+}
 
 if OPERATOR_PASSWORD_HASH:
     _PASSWORD_HASH = OPERATOR_PASSWORD_HASH
@@ -197,6 +200,149 @@ def _build_recent_actions_index(max_events: int = 1500, per_session: int = 8) ->
     return actions
 
 
+def _canonical_ip(ip_value: Any) -> str:
+    raw = str(ip_value or "unknown").strip()
+    if not raw:
+        return "unknown"
+    return raw.split(",")[0].strip() or "unknown"
+
+
+def _stage_rank(stage: str) -> int:
+    order = {
+        "recon": 0,
+        "initial_access": 1,
+        "access": 1,
+        "privilege_escalation": 2,
+        "escalate": 2,
+        "persistence": 3,
+        "persist": 3,
+        "data_exfiltration": 4,
+    }
+    return order.get(str(stage).lower(), 0)
+
+
+def _skill_rank(skill: str) -> int:
+    return {"basic": 0, "intermediate": 1, "advanced": 2}.get(str(skill).lower(), 0)
+
+
+def _collapse_active_rows_by_ip(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    grouped: Dict[str, Dict[str, Any]] = {}
+
+    for row in rows:
+        ip_key = _canonical_ip(row.get("ip", "unknown"))
+        row_ip = dict(row)
+        row_ip["ip"] = ip_key
+
+        if ip_key not in grouped:
+            row_ip["id"] = f"ip:{ip_key}"
+            row_ip["session_count"] = 1
+            source_id = str(row_ip.get("full_id", "")).strip()
+            row_ip["source_session_ids"] = [source_id] if source_id else []
+            username = str(row_ip.get("authenticated_username", "")).strip()
+            row_ip["authenticated_usernames"] = [username] if username else []
+            grouped[ip_key] = row_ip
+            continue
+
+        current = grouped[ip_key]
+        current["session_count"] = _safe_int(current.get("session_count"), 1) + 1
+        source_id = str(row_ip.get("full_id", "")).strip()
+        if source_id:
+            existing_source_ids = current.setdefault("source_session_ids", [])
+            if source_id not in existing_source_ids:
+                existing_source_ids.append(source_id)
+
+        incoming_username = str(row_ip.get("authenticated_username", "")).strip()
+        if incoming_username:
+            existing_usernames = current.setdefault("authenticated_usernames", [])
+            if incoming_username not in existing_usernames:
+                existing_usernames.append(incoming_username)
+            if not str(current.get("authenticated_username", "")).strip():
+                current["authenticated_username"] = incoming_username
+
+        incoming_role = str(row_ip.get("authenticated_role", "anonymous")).strip() or "anonymous"
+        current_role = str(current.get("authenticated_role", "anonymous")).strip() or "anonymous"
+        if current_role == "anonymous" and incoming_role != "anonymous":
+            current["authenticated_role"] = incoming_role
+
+        incoming_tier = str(row_ip.get("authenticated_service_tier", "")).strip()
+        if incoming_tier and not str(current.get("authenticated_service_tier", "")).strip():
+            current["authenticated_service_tier"] = incoming_tier
+
+        current["requests"] = _safe_int(current.get("requests"), 0) + _safe_int(row_ip.get("requests"), 0)
+        current["attacks"] = _safe_int(current.get("attacks"), 0) + _safe_int(row_ip.get("attacks"), 0)
+        current["asset_requests"] = _safe_int(current.get("asset_requests"), 0) + _safe_int(row_ip.get("asset_requests"), 0)
+        current["interaction_requests"] = _safe_int(current.get("interaction_requests"), 0) + _safe_int(row_ip.get("interaction_requests"), 0)
+
+        if _stage_rank(str(row_ip.get("chain_stage", "recon"))) > _stage_rank(str(current.get("chain_stage", "recon"))):
+            current["chain_stage"] = row_ip.get("chain_stage", current.get("chain_stage", "recon"))
+            current["stage"] = row_ip.get("stage", current.get("stage", "recon"))
+
+        current["chain_progression"] = max(
+            float(current.get("chain_progression", 0.0) or 0.0),
+            float(row_ip.get("chain_progression", 0.0) or 0.0),
+        )
+        current["chain_scenarios_completed"] = max(
+            _safe_int(current.get("chain_scenarios_completed"), 0),
+            _safe_int(row_ip.get("chain_scenarios_completed"), 0),
+        )
+        current["time_spent_seconds"] = max(
+            _safe_int(current.get("time_spent_seconds"), 0),
+            _safe_int(row_ip.get("time_spent_seconds"), 0),
+        )
+
+        if _skill_rank(str(row_ip.get("skill_level", "basic"))) > _skill_rank(str(current.get("skill_level", "basic"))):
+            current["skill_level"] = row_ip.get("skill_level", current.get("skill_level", "basic"))
+
+        attack_union = set(str(v) for v in current.get("attack_types", [])) | set(str(v) for v in row_ip.get("attack_types", []))
+        current["attack_types"] = sorted(attack_union)
+
+        current_path = list(current.get("chain_attack_path", []))
+        row_path = list(row_ip.get("chain_attack_path", []))
+        if len(row_path) > len(current_path):
+            current["chain_attack_path"] = row_path
+
+        merged_timeline = list(current.get("chain_timeline", [])) + list(row_ip.get("chain_timeline", []))
+        merged_timeline.sort(key=lambda item: str(item.get("timestamp", "")), reverse=True)
+        current["chain_timeline"] = merged_timeline[:15]
+
+        merged_actions = list(current.get("recent_actions", [])) + list(row_ip.get("recent_actions", []))
+        merged_actions.sort(key=lambda item: str(item.get("timestamp", "")), reverse=True)
+        current["recent_actions"] = merged_actions[:8]
+
+        current_last_seen = _safe_parse_iso(str(current.get("last_seen", "")))
+        row_last_seen = _safe_parse_iso(str(row_ip.get("last_seen", "")))
+        if row_last_seen and (not current_last_seen or row_last_seen > current_last_seen):
+            current["last_seen"] = row_ip.get("last_seen", current.get("last_seen", ""))
+            current["authenticated_username"] = row_ip.get(
+                "authenticated_username", current.get("authenticated_username", "")
+            )
+            current["authenticated_role"] = row_ip.get(
+                "authenticated_role", current.get("authenticated_role", "anonymous")
+            )
+            current["authenticated_service_tier"] = row_ip.get(
+                "authenticated_service_tier", current.get("authenticated_service_tier", "")
+            )
+
+        current_first_seen = _safe_parse_iso(str(current.get("first_seen", "")))
+        row_first_seen = _safe_parse_iso(str(row_ip.get("first_seen", "")))
+        if row_first_seen and (not current_first_seen or row_first_seen < current_first_seen):
+            current["first_seen"] = row_ip.get("first_seen", current.get("first_seen", ""))
+
+    now = datetime.now()
+    collapsed_rows = list(grouped.values())
+    for row in collapsed_rows:
+        last_seen_dt = _safe_parse_iso(str(row.get("last_seen", "")))
+        first_seen_dt = _safe_parse_iso(str(row.get("first_seen", "")))
+        row["seconds_since_seen"] = int((now - last_seen_dt).total_seconds()) if last_seen_dt else None
+        row["age_seconds"] = int((now - first_seen_dt).total_seconds()) if first_seen_dt else None
+        usernames = [str(v).strip() for v in row.get("authenticated_usernames", []) if str(v).strip()]
+        if usernames and not str(row.get("authenticated_username", "")).strip():
+            row["authenticated_username"] = usernames[0]
+
+    collapsed_rows.sort(key=lambda x: x.get("last_seen") or "", reverse=True)
+    return collapsed_rows
+
+
 def _session_rows(
     scope: str = "all",
     limit: int = 80,
@@ -238,7 +384,10 @@ def _session_rows(
             {
                 "id": f"{sid[:16]}...",
                 "full_id": sid,
-                "ip": str(data.get("ip", "unknown")),
+                "ip": _canonical_ip(data.get("ip", "unknown")),
+                "authenticated_username": str(data.get("authenticated_username", "")),
+                "authenticated_role": str(data.get("authenticated_role", "anonymous")),
+                "authenticated_service_tier": str(data.get("authenticated_service_tier", "")),
                 "first_seen": first_seen_raw,
                 "last_seen": last_seen_raw,
                 "requests": _safe_int(data.get("request_count"), 0),
@@ -262,6 +411,9 @@ def _session_rows(
             }
         )
 
+    if scope == "active" and OPERATOR_GROUP_ACTIVE_BY_IP:
+        rows = _collapse_active_rows_by_ip(rows)
+
     rows.sort(key=lambda x: x.get("last_seen") or "", reverse=True)
     return rows[:limit]
 
@@ -269,12 +421,16 @@ def _session_rows(
 def process_event(event: Dict[str, Any]) -> None:
     session_id = str(event.get("session_id", "unknown"))
     endpoint = str(event.get("endpoint", "/"))
+    ip_value = _canonical_ip(event.get("ip", "unknown"))
     is_asset_request = _is_asset_endpoint(endpoint)
 
     if session_id not in _sessions:
         _sessions[session_id] = {
             "id": session_id,
-            "ip": str(event.get("ip", "unknown")),
+            "ip": ip_value,
+            "authenticated_username": str(event.get("authenticated_username", "")).strip(),
+            "authenticated_role": str(event.get("authenticated_role", "anonymous")).strip() or "anonymous",
+            "authenticated_service_tier": str(event.get("authenticated_service_tier", "")).strip(),
             "first_seen": str(event.get("timestamp", "")),
             "last_seen": str(event.get("timestamp", "")),
             "request_count": 0,
@@ -305,6 +461,18 @@ def process_event(event: Dict[str, Any]) -> None:
     session_data["chain_scenarios_completed"] = _safe_int(
         event.get("chain_scenarios_completed", session_data.get("chain_scenarios_completed", 0))
     )
+    incoming_username = str(event.get("authenticated_username", "")).strip()
+    if incoming_username:
+        session_data["authenticated_username"] = incoming_username
+
+    incoming_role = str(event.get("authenticated_role", "anonymous")).strip() or "anonymous"
+    if incoming_role != "anonymous" or not str(session_data.get("authenticated_role", "")).strip():
+        session_data["authenticated_role"] = incoming_role
+
+    incoming_tier = str(event.get("authenticated_service_tier", "")).strip()
+    if incoming_tier:
+        session_data["authenticated_service_tier"] = incoming_tier
+
     session_data["skill_level"] = str(event.get("attacker_skill_level", session_data.get("skill_level", "basic")))
     session_data["time_spent_seconds"] = _safe_int(
         event.get("time_spent_seconds", session_data.get("time_spent_seconds", 0))
@@ -337,7 +505,7 @@ def process_event(event: Dict[str, Any]) -> None:
                 {
                     "session_id": f"{session_id[:16]}...",
                     "session_id_full": session_id,
-                    "ip": str(event.get("ip", "unknown")),
+                    "ip": ip_value,
                     "type": attack_type,
                     "severity": str(attack.get("severity", "UNKNOWN")),
                     "endpoint": endpoint,
@@ -350,7 +518,9 @@ def process_event(event: Dict[str, Any]) -> None:
             "timestamp": str(event.get("timestamp", "")),
             "session_id": f"{session_id[:16]}...",
             "session_id_full": session_id,
-            "ip": str(event.get("ip", "unknown")),
+            "ip": ip_value,
+            "authenticated_username": str(event.get("authenticated_username", "")).strip(),
+            "authenticated_role": str(event.get("authenticated_role", "anonymous")).strip() or "anonymous",
             "method": str(event.get("method", "GET")),
             "endpoint": endpoint,
             "attacks": len(detected) if isinstance(detected, list) else 0,
@@ -393,7 +563,10 @@ def load_events_from_file() -> None:
                 if session_id not in sessions_local:
                     sessions_local[session_id] = {
                         "id": session_id,
-                        "ip": str(event.get("ip", "unknown")),
+                        "ip": _canonical_ip(event.get("ip", "unknown")),
+                        "authenticated_username": str(event.get("authenticated_username", "")).strip(),
+                        "authenticated_role": str(event.get("authenticated_role", "anonymous")).strip() or "anonymous",
+                        "authenticated_service_tier": str(event.get("authenticated_service_tier", "")).strip(),
                         "first_seen": str(event.get("timestamp", "")),
                         "last_seen": str(event.get("timestamp", "")),
                         "request_count": 0,
@@ -424,6 +597,15 @@ def load_events_from_file() -> None:
                 session_data["chain_scenarios_completed"] = _safe_int(
                     event.get("chain_scenarios_completed", session_data.get("chain_scenarios_completed", 0))
                 )
+                incoming_username = str(event.get("authenticated_username", "")).strip()
+                if incoming_username:
+                    session_data["authenticated_username"] = incoming_username
+                incoming_role = str(event.get("authenticated_role", "anonymous")).strip() or "anonymous"
+                if incoming_role != "anonymous" or not str(session_data.get("authenticated_role", "")).strip():
+                    session_data["authenticated_role"] = incoming_role
+                incoming_tier = str(event.get("authenticated_service_tier", "")).strip()
+                if incoming_tier:
+                    session_data["authenticated_service_tier"] = incoming_tier
                 session_data["skill_level"] = str(event.get("attacker_skill_level", session_data.get("skill_level", "basic")))
                 session_data["time_spent_seconds"] = _safe_int(
                     event.get("time_spent_seconds", session_data.get("time_spent_seconds", 0))
@@ -454,7 +636,7 @@ def load_events_from_file() -> None:
                             {
                                 "session_id": f"{session_id[:16]}...",
                                 "session_id_full": session_id,
-                                "ip": str(event.get("ip", "unknown")),
+                                "ip": _canonical_ip(event.get("ip", "unknown")),
                                 "type": attack_type,
                                 "severity": str(attack.get("severity", "UNKNOWN")),
                                 "endpoint": endpoint,
@@ -467,7 +649,9 @@ def load_events_from_file() -> None:
                         "timestamp": str(event.get("timestamp", "")),
                         "session_id": f"{session_id[:16]}...",
                         "session_id_full": session_id,
-                        "ip": str(event.get("ip", "unknown")),
+                        "ip": _canonical_ip(event.get("ip", "unknown")),
+                        "authenticated_username": str(event.get("authenticated_username", "")).strip(),
+                        "authenticated_role": str(event.get("authenticated_role", "anonymous")).strip() or "anonymous",
                         "method": str(event.get("method", "GET")),
                         "endpoint": endpoint,
                         "attacks": len(detected) if isinstance(detected, list) else 0,
@@ -867,7 +1051,7 @@ DASHBOARD_HTML = """
             <div class="ph"><span>Historical Sessions</span><span id="history-count" class="muted">0</span></div>
             <div class="pc">
                 <table>
-                    <thead><tr><th>Last Seen</th><th>IP</th><th>Req</th><th>Interactive</th><th>Assets</th><th>Attacks</th><th>Stage</th></tr></thead>
+                    <thead><tr><th>Last Seen</th><th>IP</th><th>User</th><th>Req</th><th>Interactive</th><th>Assets</th><th>Attacks</th><th>Stage</th></tr></thead>
                     <tbody id="history"></tbody>
                 </table>
             </div>
@@ -905,6 +1089,11 @@ DASHBOARD_HTML = """
             }
 
             wall.innerHTML = sessions.map(s => {
+                const identityName = String(s.authenticated_username || '').trim();
+                const identityRole = String(s.authenticated_role || 'anonymous').trim() || 'anonymous';
+                const identityTier = String(s.authenticated_service_tier || '').trim();
+                const identityLabel = identityName ? (identityName + ' [' + identityRole + ']') : identityRole;
+
                 const actionHtml = (s.recent_actions || []).slice(0, 6).map(a => {
                     const cls = a.is_asset_request ? 'asset' : '';
                     const attackInfo = a.attacks > 0 ? (' [' + a.attacks + ' atk]') : '';
@@ -939,6 +1128,7 @@ DASHBOARD_HTML = """
                     + '</div>'
                     + '<div class="chain">' + esc(chainPath) + '</div>'
                     + '<div class="chain">' + esc(attackViz) + '</div>'
+                        + '<div class="chain">Identity: ' + esc(identityLabel) + (identityTier ? (' | Tier: ' + esc(identityTier)) : '') + '</div>'
                     + '<div class="types">' + typeHtml + '</div>'
                     + '<div class="actions-feed">' + actionHtml + '</div>'
                     + '<div class="timeline">' + timeline + '</div>'
@@ -950,13 +1140,14 @@ DASHBOARD_HTML = """
             const h = document.getElementById('history');
             document.getElementById('history-count').textContent = sessions.length;
             if(!sessions.length){
-                h.innerHTML = '<tr><td colspan="7" class="empty">No historical sessions yet.</td></tr>';
+                h.innerHTML = '<tr><td colspan="8" class="empty">No historical sessions yet.</td></tr>';
                 return;
             }
             h.innerHTML = sessions.slice(0, 120).map(s =>
                 '<tr>'
                 + '<td>' + esc(t(s.last_seen)) + '</td>'
                 + '<td class="mono">' + esc(s.ip) + '</td>'
+                + '<td>' + esc(s.authenticated_username || '-') + '</td>'
                 + '<td>' + esc(s.requests) + '</td>'
                 + '<td>' + esc(s.interaction_requests) + '</td>'
                 + '<td>' + esc(s.asset_requests) + '</td>'
@@ -995,8 +1186,11 @@ DASHBOARD_HTML = """
                 const statusClass = Number(x.response) >= 400 ? 'danger' : 'ok';
                 const assetClass = x.is_asset_request ? 'asset' : '';
                 const attackInfo = x.attacks > 0 ? (' [' + x.attacks + ' atk]') : '';
+                const identityLabel = x.authenticated_username
+                    ? (x.authenticated_username + ' [' + (x.authenticated_role || 'user') + ']')
+                    : (x.authenticated_role || 'anonymous');
                 return '<div class="event">'
-                    + '<span class="event-main ' + assetClass + '">' + t(x.timestamp) + ' <span class="muted mono">' + esc(x.ip) + '</span> ' + esc(x.method) + ' ' + esc(x.endpoint) + attackInfo + '</span>'
+                    + '<span class="event-main ' + assetClass + '">' + t(x.timestamp) + ' <span class="muted mono">' + esc(x.ip) + '</span> <span class="muted">(' + esc(identityLabel) + ')</span> ' + esc(x.method) + ' ' + esc(x.endpoint) + attackInfo + '</span>'
                     + '<span class="' + statusClass + '">[' + esc(x.response) + ']</span>'
                     + '</div>';
             }).join('');

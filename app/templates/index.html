@@ -3,72 +3,215 @@
 {% block title %}CyberShield - Enterprise Security Solutions{% endblock %}
 
 {% block content %}
-<section class="hero" style="text-align: center; padding: 4rem 0;">
-    <h1 style="font-size: 3rem; margin-bottom: 1rem;">
-        <span style="color: #00d4ff;">Enterprise</span> Security Platform
-    </h1>
-    <p style="font-size: 1.2rem; color: #999; max-width: 600px; margin: 0 auto 2rem;">
-        Protect your digital assets with our comprehensive cybersecurity solution. 
-        Advanced threat detection, real-time monitoring, and incident response.
-    </p>
-    <a href="/login" class="btn btn-primary" style="margin-right: 1rem;">Get Started</a>
-    <a href="/about" class="btn" style="background: transparent; border: 1px solid #00d4ff; color: #00d4ff;">Learn More</a>
+<style>
+    .hero-grid {
+        display: grid;
+        grid-template-columns: 1.15fr 0.85fr;
+        gap: 1rem;
+        align-items: stretch;
+        margin-top: 0.4rem;
+    }
+
+    .hero-card {
+        border: 1px solid rgba(69, 98, 129, 0.58);
+        border-radius: 16px;
+        background: linear-gradient(170deg, rgba(13, 27, 44, 0.86), rgba(10, 18, 29, 0.86));
+        padding: 1.2rem;
+        min-height: 340px;
+    }
+
+    .kicker {
+        color: #95bed5;
+        letter-spacing: 0.12em;
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        margin-bottom: 0.55rem;
+    }
+
+    .hero-title {
+        font-size: clamp(1.85rem, 4vw, 3rem);
+        line-height: 1.05;
+        margin-bottom: 0.8rem;
+    }
+
+    .hero-title span {
+        color: #8ce7ff;
+    }
+
+    .hero-copy {
+        color: #9fb5c8;
+        max-width: 44rem;
+        margin-bottom: 1rem;
+    }
+
+    .hero-actions {
+        display: flex;
+        gap: 0.6rem;
+        flex-wrap: wrap;
+    }
+
+    .btn-ghost {
+        border: 1px solid rgba(120, 174, 214, 0.45);
+        color: #b9daf1;
+        background: rgba(17, 33, 52, 0.5);
+    }
+
+    .hero-side {
+        display: grid;
+        gap: 0.75rem;
+    }
+
+    .pulse-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.7rem;
+    }
+
+    .pulse {
+        border: 1px solid rgba(70, 106, 133, 0.45);
+        border-radius: 12px;
+        padding: 0.8rem;
+        background: rgba(11, 22, 34, 0.72);
+    }
+
+    .pulse .v {
+        font-size: 1.48rem;
+        font-weight: 700;
+        color: #75e6c9;
+    }
+
+    .pulse .l {
+        color: #89a5bd;
+        font-size: 0.78rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+    }
+
+    .live-feed {
+        border: 1px solid rgba(61, 92, 121, 0.45);
+        border-radius: 12px;
+        background: rgba(8, 17, 30, 0.7);
+        padding: 0.8rem;
+    }
+
+    .feed-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 0.6rem;
+        color: #a7c0d6;
+        font-size: 0.83rem;
+        padding: 0.34rem 0;
+        border-bottom: 1px solid rgba(54, 83, 111, 0.35);
+    }
+
+    .feed-row:last-child { border-bottom: 0; }
+
+    .features {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 0.8rem;
+        margin-top: 1rem;
+    }
+
+    .feature-card {
+        border: 1px solid rgba(57, 88, 118, 0.5);
+        border-radius: 12px;
+        padding: 0.9rem;
+        background: rgba(9, 18, 30, 0.72);
+    }
+
+    .feature-card h3 {
+        color: #9ddcf6;
+        font-size: 0.95rem;
+        margin-bottom: 0.35rem;
+    }
+
+    .feature-card p {
+        color: #93abc1;
+        font-size: 0.86rem;
+        line-height: 1.45;
+    }
+
+    @media (max-width: 980px) {
+        .hero-grid { grid-template-columns: 1fr; }
+    }
+</style>
+
+<section class="hero-grid">
+    <div class="hero-card">
+        <div class="kicker">Managed Defense Platform</div>
+        <h1 class="hero-title">Continuous <span>Threat Exposure</span> Intelligence</h1>
+        <p class="hero-copy">CyberShield combines perimeter telemetry, workload risk scoring, and response workflows into one operations surface built for modern security teams.</p>
+        <div class="hero-actions">
+            <a href="/login" class="btn btn-primary">Open Platform</a>
+            <a href="/about" class="btn btn-ghost">See Architecture</a>
+            <a href="/contact" class="btn btn-ghost">Book Security Review</a>
+        </div>
+    </div>
+    <div class="hero-side">
+        <div class="pulse-grid">
+            <div class="pulse"><div class="v" id="m1">3,421</div><div class="l">Signals Ingested</div></div>
+            <div class="pulse"><div class="v" id="m2">98.7%</div><div class="l">Detection Coverage</div></div>
+            <div class="pulse"><div class="v" id="m3">14</div><div class="l">Active Hunts</div></div>
+            <div class="pulse"><div class="v" id="m4">42ms</div><div class="l">Median Latency</div></div>
+        </div>
+        <div class="live-feed" id="live-feed">
+            <div class="feed-row"><span>auth-api</span><span>baseline stable</span></div>
+            <div class="feed-row"><span>payments edge</span><span>scan blocked</span></div>
+            <div class="feed-row"><span>policy engine</span><span>rules refreshed</span></div>
+            <div class="feed-row"><span>incident queue</span><span>2 escalations</span></div>
+        </div>
+    </div>
 </section>
 
-<section class="features" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 2rem; margin-top: 4rem;">
-    <div class="card">
-        <h3>🛡️ Threat Detection</h3>
-        <p>Real-time monitoring and detection of security threats using advanced machine learning algorithms.</p>
-    </div>
-    
-    <div class="card">
-        <h3>🔍 Vulnerability Scanning</h3>
-        <p>Comprehensive scanning of your infrastructure to identify and remediate security vulnerabilities.</p>
-    </div>
-    
-    <div class="card">
-        <h3>📊 Security Analytics</h3>
-        <p>Deep insights into your security posture with detailed analytics and reporting dashboards.</p>
-    </div>
-    
-    <div class="card">
-        <h3>🚨 Incident Response</h3>
-        <p>24/7 incident response team ready to help you contain and remediate security breaches.</p>
-    </div>
-    
-    <div class="card">
-        <h3>🔐 Compliance</h3>
-        <p>Ensure compliance with industry standards including PCI-DSS, HIPAA, SOC 2, and GDPR.</p>
-    </div>
-    
-    <div class="card">
-        <h3>☁️ Cloud Security</h3>
-        <p>Secure your cloud infrastructure across AWS, Azure, and Google Cloud Platform.</p>
-    </div>
+<section class="features">
+    <article class="feature-card">
+        <h3>Behavioral Threat Graph</h3>
+        <p>Cross-session correlation maps attacker behavior from first touch to deep reconnaissance movement.</p>
+    </article>
+    <article class="feature-card">
+        <h3>Exposure Validation</h3>
+        <p>Simulated weak paths validate SOC readiness and improve analyst reaction playbooks.</p>
+    </article>
+    <article class="feature-card">
+        <h3>Adaptive Deception Layer</h3>
+        <p>Response variance keeps interaction realistic and increases signal depth for investigation.</p>
+    </article>
+    <article class="feature-card">
+        <h3>Operator Intelligence Console</h3>
+        <p>Live activity wall and timeline filters provide a clear map of attacker progression.</p>
+    </article>
 </section>
 
-<section class="stats" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 2rem; margin-top: 4rem; text-align: center;">
-    <div>
-        <div style="font-size: 3rem; color: #00d4ff; font-weight: bold;">500+</div>
-        <div style="color: #999;">Clients Protected</div>
-    </div>
-    <div>
-        <div style="font-size: 3rem; color: #00d4ff; font-weight: bold;">1M+</div>
-        <div style="color: #999;">Threats Blocked</div>
-    </div>
-    <div>
-        <div style="font-size: 3rem; color: #00d4ff; font-weight: bold;">99.9%</div>
-        <div style="color: #999;">Uptime SLA</div>
-    </div>
-    <div>
-        <div style="font-size: 3rem; color: #00d4ff; font-weight: bold;">24/7</div>
-        <div style="color: #999;">Support</div>
-    </div>
-</section>
+<script>
+(() => {
+    const m1 = document.getElementById('m1');
+    const m3 = document.getElementById('m3');
+    const m4 = document.getElementById('m4');
+    const feed = document.getElementById('live-feed');
+    const msgs = [
+        ['vault gateway', 'token anomaly'],
+        ['audit pipeline', 'digest verified'],
+        ['identity edge', 'new trust policy'],
+        ['risk engine', 'threat score raised'],
+        ['artifact scanner', 'signature mismatch'],
+    ];
 
-<section class="cta" style="text-align: center; margin-top: 4rem; padding: 3rem; background: rgba(0, 212, 255, 0.1); border-radius: 10px;">
-    <h2 style="color: #00d4ff; margin-bottom: 1rem;">Ready to Secure Your Business?</h2>
-    <p style="color: #999; margin-bottom: 2rem;">Start your free trial today. No credit card required.</p>
-    <a href="/signup" class="btn btn-primary">Start Free Trial</a>
-</section>
+    setInterval(() => {
+        const nextSignals = (parseInt(m1.textContent.replace(/,/g, ''), 10) || 0) + Math.floor(Math.random() * 16);
+        m1.textContent = nextSignals.toLocaleString();
+        m3.textContent = String(10 + Math.floor(Math.random() * 8));
+        m4.textContent = String(36 + Math.floor(Math.random() * 16)) + 'ms';
+
+        const [svc, state] = msgs[Math.floor(Math.random() * msgs.length)];
+        const row = document.createElement('div');
+        row.className = 'feed-row';
+        row.innerHTML = '<span>' + svc + '</span><span>' + state + '</span>';
+        feed.prepend(row);
+        while (feed.children.length > 5) {
+            feed.removeChild(feed.lastChild);
+        }
+    }, 3500);
+})();
+</script>
 {% endblock %}

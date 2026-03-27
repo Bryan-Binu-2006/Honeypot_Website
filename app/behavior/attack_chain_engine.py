@@ -55,7 +55,7 @@ class AttackChainEngine:
         'api_key_admin_access': ['debug_config_api_key_leak'],
         'k8s_dashboard_access': ['redis_service_probe'],
         'cicd_pipeline_leak': ['k8s_dashboard_access'],
-        'lateral_movement_logs': ['sudo_escalation_signal'],
+        'lateral_movement_logs': ['shell_unlocked'],
         'employee_creds_dump': ['db_console_access'],
         'internal_slack_leak': ['lateral_movement_logs'],
         'secrets_vault_access': ['ssrf_internal_storage_access'],
@@ -150,7 +150,7 @@ class AttackChainEngine:
                 "method": "POST",
                 "query_contains": [".php", ".jpg"]
             },
-            "next_hints": ["/files/read?path=/uploads/", "/terminal/unlocked"],
+            "next_hints": ["/files/read?path=/uploads/", "/internal/logs/lateral"],
         },
         {
             "id": "file_exec_simulated",
@@ -160,13 +160,13 @@ class AttackChainEngine:
                 "endpoint_contains": ["/files/read"],
                 "query_contains": ["uploads", ".php", "cmd="]
             },
-            "next_hints": ["/terminal/unlocked", "/internal/logs/lateral"],
+            "next_hints": ["/internal/logs/lateral", "/internal/db"],
         },
         {
             "id": "shell_unlocked",
-            "name": "Unlocked post-exploit shell panel",
+            "name": "Post-exploit movement surface unlocked",
             "stage": "persistence",
-            "trigger": {"endpoint_contains": ["/terminal/unlocked"]},
+            "trigger": {"endpoint_contains": ["/internal/logs"]},
             "next_hints": ["/internal/cache", "/internal/db"],
         },
         {
@@ -240,8 +240,8 @@ class AttackChainEngine:
             "name": "Sudo escalation signal",
             "stage": "persistence",
             "trigger": {
-                "endpoint_contains": ["/terminal/exec", "/terminal/shell"],
-                "query_contains": ["sudo", "-s"]
+                "endpoint_contains": ["/files/read"],
+                "query_contains": ["cmd=sudo"]
             },
             "next_hints": ["/internal/logs/lateral", "/internal/db"],
         },
@@ -540,7 +540,7 @@ class AttackChainEngine:
                 "recon": ["/static/js/internal-tools.js", "/forgot-password", "/api/v1/health"],
                 "initial_access": ["/reset-password?token=", "/api/v2/internal/users", "/admin/debug/config"],
                 "privilege_escalation": ["/internal/admin-service", "/api/internal/storage", "/files/upload"],
-                "persistence": ["/terminal/unlocked", "/internal/cache", "/internal/logs/lateral"],
+                "persistence": ["/internal/logs", "/internal/cache", "/internal/logs/lateral"],
                 "data_exfiltration": ["/internal/vault/secrets", "/internal/collab/slack", "/internal/db"],
             }
             hints = fallback.get(stage, ["/internal/logs"])

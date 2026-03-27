@@ -10,13 +10,92 @@ INTERNAL DOCUMENTATION:
 - Login accepts various injection attempts and returns fake success
 """
 
-from flask import Blueprint, render_template, request, redirect, url_for, g, jsonify, make_response
+from flask import Blueprint, render_template, request, redirect, url_for, g, jsonify, make_response, session
+from functools import wraps
+import os
+import random
 from ..response.engine import get_response_engine
 from ..session.manager import SessionManager
 from ..behavior.attack_chain_engine import get_attack_chain_engine
 
 
 _RESET_TOKENS = {}
+
+_CUSTOMER_ACCOUNTS = {
+    'nina.r@northbridge.local': {
+        'password': os.environ.get('CUSTOMER_PASSWORD_NINA', 'ClientPortal!2026'),
+        'display_name': 'Nina Rao',
+        'company': 'Northbridge Capital',
+        'tier': 'Enterprise Guard',
+    },
+    'liam.p@vectorgrid.io': {
+        'password': os.environ.get('CUSTOMER_PASSWORD_LIAM', 'ClientPortal!2026'),
+        'display_name': 'Liam Patel',
+        'company': 'VectorGrid Systems',
+        'tier': 'Business Shield',
+    },
+    'maya.k@solislogistics.com': {
+        'password': os.environ.get('CUSTOMER_PASSWORD_MAYA', 'ClientPortal!2026'),
+        'display_name': 'Maya Kim',
+        'company': 'Solis Logistics',
+        'tier': 'Enterprise Guard',
+    },
+}
+
+
+def _looks_like_sqli(value: str) -> bool:
+    lowered = str(value or '').lower()
+    markers = ["' or '", ' or 1=1', 'union select', '--', '/*', 'sleep(', 'benchmark(', 'drop table']
+    return any(marker in lowered for marker in markers)
+
+
+def _find_customer_account(username: str):
+    normalized = str(username or '').strip().lower()
+    if not normalized:
+        return None, None
+
+    for key, account in _CUSTOMER_ACCOUNTS.items():
+        key_lower = key.lower()
+        key_short = key_lower.split('@', 1)[0]
+        if normalized in {key_lower, key_short}:
+            return key, account
+    return None, None
+
+
+def customer_login_required(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not session.get('customer_authenticated'):
+            return redirect(url_for('public.login', next=request.path))
+        return fn(*args, **kwargs)
+
+    return wrapper
+
+
+def _build_service_snapshot(customer_email: str, account: dict) -> dict:
+    base_score = 72 + random.randint(0, 12)
+    blocked = 14 + random.randint(0, 15)
+    unresolved = 2 + random.randint(0, 4)
+    return {
+        'customer_email': customer_email,
+        'display_name': account.get('display_name', 'Customer Analyst'),
+        'company': account.get('company', 'CyberShield Client'),
+        'tier': account.get('tier', 'Business Shield'),
+        'exposure_score': base_score,
+        'blocked_attempts_24h': blocked,
+        'unresolved_findings': unresolved,
+        'policy_uptime': f"{99.70 + random.random() * 0.25:.2f}%",
+        'workload_risk': [
+            {'name': 'identity-edge', 'risk': random.choice(['low', 'medium'])},
+            {'name': 'payment-gateway', 'risk': random.choice(['medium', 'high'])},
+            {'name': 'artifact-store', 'risk': random.choice(['low', 'medium'])},
+        ],
+        'recent_notices': [
+            'Adaptive access policy refreshed for service accounts.',
+            'Edge WAF signature pack rolled out successfully.',
+            'Northbound API anomaly threshold tuned by +8%.',
+        ],
+    }
 
 
 public_bp = Blueprint('public', __name__)
@@ -45,6 +124,8 @@ def login():
     4. Never actually authenticate anyone (it's a honeypot)
     """
     if request.method == 'GET':
+        if session.get('customer_authenticated'):
+            return redirect(url_for('public.service_intelligence'))
         return render_template('login.html')
     
     # POST - Check for detected attacks
@@ -56,6 +137,17 @@ def login():
         for a in detected_attacks
     )
     
+    username = request.form.get('username', '').strip()
+    password = request.form.get('password', '')
+
+    if request.is_json:
+        payload = request.get_json(silent=True) or {}
+        username = str(payload.get('username', username)).strip()
+        password = str(payload.get('password', password))
+
+    if not sqli_detected:
+        sqli_detected = _looks_like_sqli(username) or _looks_like_sqli(password)
+
     if sqli_detected:
         # Generate fake admin session
         response = make_response(redirect('/admin/dashboard'))
@@ -65,9 +157,60 @@ def login():
             httponly=True
         )
         return response
+
+    matched_email, account = _find_customer_account(username)
+    if account and password == account.get('password'):
+        session['customer_authenticated'] = True
+        session['customer_username'] = matched_email
+        session['customer_display_name'] = account.get('display_name', 'Customer Analyst')
+        session['customer_company'] = account.get('company', 'CyberShield Client')
+        session['customer_tier'] = account.get('tier', 'Business Shield')
+
+        next_url = request.args.get('next', '/service/intelligence')
+        if not str(next_url).startswith('/service'):
+            next_url = '/service/intelligence'
+        return redirect(next_url)
     
     # Normal login attempt - always fail after delay
     return render_template('login.html', error='Invalid credentials'), 401
+
+
+@public_bp.route('/logout')
+def logout():
+    """Logout for customer portal sessions."""
+    session.pop('customer_authenticated', None)
+    session.pop('customer_username', None)
+    session.pop('customer_display_name', None)
+    session.pop('customer_company', None)
+    session.pop('customer_tier', None)
+    return redirect(url_for('public.login'))
+
+
+@public_bp.route('/service/intelligence')
+@customer_login_required
+def service_intelligence():
+    """Believable premium service dashboard for authenticated customers."""
+    customer_email = str(session.get('customer_username', 'unknown@client.local'))
+    account = {
+        'display_name': session.get('customer_display_name', 'Customer Analyst'),
+        'company': session.get('customer_company', 'CyberShield Client'),
+        'tier': session.get('customer_tier', 'Business Shield'),
+    }
+    snapshot = _build_service_snapshot(customer_email, account)
+    return render_template('service_intelligence.html', service=snapshot)
+
+
+@public_bp.route('/service/intelligence/data')
+@customer_login_required
+def service_intelligence_data():
+    """Refresh endpoint for customer intelligence service metrics."""
+    customer_email = str(session.get('customer_username', 'unknown@client.local'))
+    account = {
+        'display_name': session.get('customer_display_name', 'Customer Analyst'),
+        'company': session.get('customer_company', 'CyberShield Client'),
+        'tier': session.get('customer_tier', 'Business Shield'),
+    }
+    return jsonify(_build_service_snapshot(customer_email, account))
 
 
 @public_bp.route('/robots.txt')
@@ -101,7 +244,6 @@ Disallow: /debug
 Disallow: /debug/config
 Disallow: /files
 Disallow: /files/backup
-Disallow: /terminal
 Disallow: /.env
 Disallow: /.git
 Disallow: /backup

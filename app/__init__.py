@@ -10,7 +10,7 @@ INTERNAL DOCUMENTATION:
 - No internal workings are exposed in responses
 """
 
-from flask import Flask, g
+from flask import Flask, g, session as flask_session
 from typing import Optional
 
 from .config import get_config
@@ -36,6 +36,21 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     # Load configuration
     config = get_config()
     app.config.from_object(config)
+
+    # Respect reverse proxy headers when running behind nginx/load balancers.
+    if app.config.get('PROXY_FIX_ENABLED', True):
+        try:
+            from werkzeug.middleware.proxy_fix import ProxyFix
+
+            app.wsgi_app = ProxyFix(
+                app.wsgi_app,
+                x_for=int(app.config.get('PROXY_FIX_X_FOR', 1)),
+                x_proto=int(app.config.get('PROXY_FIX_X_PROTO', 1)),
+                x_host=int(app.config.get('PROXY_FIX_X_HOST', 1)),
+                x_port=int(app.config.get('PROXY_FIX_X_PORT', 1)),
+            )
+        except Exception:
+            pass
     
     # Initialize extensions and services
     _init_extensions(app)
@@ -104,7 +119,16 @@ def _register_middleware(app: Flask) -> None:
         3. Run detection engine
         4. Store results for response engine
         """
-        from flask import request
+        from flask import request, redirect
+
+        # Optional HTTPS-only enforcement for production deployments.
+        if bool(app.config.get('FORCE_HTTPS', False)):
+            host = request.host.split(':', 1)[0].lower()
+            forwarded_proto = request.headers.get('X-Forwarded-Proto', '').lower()
+            is_https = request.is_secure or forwarded_proto == 'https'
+            if not is_https and host not in {'127.0.0.1', 'localhost'}:
+                secure_url = request.url.replace('http://', 'https://', 1)
+                return redirect(secure_url, code=301)
         
         # Session management - creates or validates session
         session_id = session_manager.get_or_create_session(request)
@@ -155,9 +179,26 @@ def _register_middleware(app: Flask) -> None:
         # This uses internal interface - logging details are abstracted
         if hasattr(g, 'request_analysis'):
             from .logging_service.interface import queue_event
+
+            analysis_payload = dict(g.request_analysis)
+            auth_username = (
+                flask_session.get('customer_username')
+                or flask_session.get('admin_username')
+                or ''
+            )
+            auth_role = 'anonymous'
+            if flask_session.get('customer_authenticated'):
+                auth_role = 'customer'
+            elif flask_session.get('admin_authenticated'):
+                auth_role = 'admin'
+
+            analysis_payload['authenticated_username'] = auth_username
+            analysis_payload['authenticated_role'] = auth_role
+            analysis_payload['authenticated_service_tier'] = flask_session.get('customer_tier', '')
+
             queue_event(
                 session_id=g.get('session_id'),
-                analysis=g.request_analysis,
+                analysis=analysis_payload,
                 response_code=response.status_code
             )
         
@@ -173,20 +214,18 @@ def _register_blueprints(app: Flask) -> None:
     - admin: Admin panel, dashboard (FAKE - for attackers)
     - api: Fake internal APIs
     - files: File explorer (LFI/IDOR simulation)
-    - terminal: Web terminal simulation
+    - internal: Fake internal infrastructure endpoints
     """
     from .routes.public import public_bp
     from .routes.admin import admin_bp
     from .routes.api import api_bp
     from .routes.files import files_bp
-    from .routes.terminal import terminal_bp
     from .routes.internal import internal_bp
     
     app.register_blueprint(public_bp)
     app.register_blueprint(admin_bp, url_prefix='/admin')
     app.register_blueprint(api_bp, url_prefix='/api')
     app.register_blueprint(files_bp, url_prefix='/files')
-    app.register_blueprint(terminal_bp, url_prefix='/terminal')
     app.register_blueprint(internal_bp, url_prefix='/internal')
 
 
