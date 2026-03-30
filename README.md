@@ -44,8 +44,8 @@ A sophisticated cybersecurity honeypot web application that simulates a realisti
 └───────────────────────────────┬─────────────────────────────────────────┘
                                 │ HTTP(S)
 ┌───────────────────────────────▼─────────────────────────────────────────┐
-│                       Flask Honeypot App (run.py)                      │
-│                                 Port 5000                              │
+│                     Web App Launcher (webapp.py)                       │
+│         auto|nginx|direct mode -> waitress app on :5000               │
 │                                                                         │
 │  before_request                                                         │
 │  1) SessionManager.get_or_create_session()                              │
@@ -79,7 +79,8 @@ A sophisticated cybersecurity honeypot web application that simulates a realisti
 
 ### Runtime Notes
 
-- One browser session is correlated by the sid cookie written in after_request.
+- `webapp.py` is the recommended main entrypoint (it auto-selects nginx/direct mode).
+- One browser session is correlated by the sid cookie written in `after_request`.
 - The operator dashboard separates active vs historical sessions.
 - Active window defaults to 15 minutes and is configurable via OPERATOR_ACTIVE_WINDOW_MINUTES.
 - Asset hits (static files, favicon, robots/sitemap) are tracked separately from interactive requests.
@@ -241,18 +242,18 @@ A sophisticated cybersecurity honeypot web application that simulates a realisti
 
 ## 🚀 Local Development
 
-### Terminal 1 - Run Honeypot
+### Terminal 1 - Run Honeypot Web App
 ```bash
 cd C:\Users\[YourUsername]\Documents\Honeypot_Website
-python run.py
+python webapp.py
 ```
 
 **Access:** http://127.0.0.1:5000
 
-### Terminal 2 - Run Operator Dashboard
+### Terminal 2 - Run Operator Dashboard (Local-only launcher)
 ```bash
 cd C:\Users\[YourUsername]\Documents\Honeypot_Website
-python operator_dashboard.py
+python operator_local.py
 ```
 
 **Access:** http://127.0.0.1:5001
@@ -292,7 +293,24 @@ http://127.0.0.1:5000/admin/users/2
 
 ---
 
-## 🌐 Production Deployment (Render)
+## 🌐 Production Deployment
+
+### Recommended: VM + Nginx + Domain (latest flow)
+
+For current production topology, use:
+
+- `python3 webapp.py` (nginx upstream mode)
+- `python3 operator_local.py` (local-only operator)
+- Nginx on `80/443` proxying app upstream at `127.0.0.1:5000`
+- Operator only on `127.0.0.1:5001` (SSH tunnel access)
+
+Detailed runbooks in this repo:
+
+- `CLOUDFLARE_VM_DOMAIN_SETUP_PRIVATE.md`
+- `GCP_QUICK_START.md`
+- `GCP_SSH_TUNNEL.md`
+
+### Optional: Render deployment
 
 ### Step 1: Push to GitHub
 
@@ -304,6 +322,8 @@ git push origin main
 
 **Important:** Only push these files:
 - `app/` directory
+- `webapp.py`
+- `operator_local.py`
 - `requirements.txt`
 - `run.py`
 - `.env.example`
@@ -313,7 +333,6 @@ git push origin main
 
 **DO NOT PUSH:**
 - `.env` (contains secrets)
-- `operator_dashboard.py` (keep locally)
 - `data/` directory (logs)
 
 ### Step 2: Deploy on Render.com
@@ -341,7 +360,7 @@ git push origin main
 
 ```bash
 # On YOUR machine (not on Render)
-python operator_dashboard.py
+python operator_local.py
 ```
 
 Access: http://127.0.0.1:5001
@@ -420,7 +439,9 @@ Session IDs are generated using HMAC(IP + UserAgent + Timestamp + Nonce, SECRET)
 
 ```
 Honeypot_Website/
+├── webapp.py                       # Smart launcher (auto/nginx/direct)
 ├── run.py                          # Main application entry point
+├── operator_local.py               # Local-only operator launcher
 ├── operator_dashboard.py           # Standalone operator console
 ├── requirements.txt                # Python dependencies
 ├── .env                           # Configuration (DO NOT COMMIT)
@@ -454,7 +475,8 @@ Honeypot_Website/
 │   │   └── tracker.py           # Attacker behavior tracking
 │   │
 │   ├── behavior/                # Progressive deception
-│   │   └── engine.py            # Attacker stage progression
+│   │   ├── engine.py            # Attacker stage progression
+│   │   └── attack_chain_engine.py # Multi-stage chain gating + scenarios
 │   │
 │   ├── middleware/              # Request/response middleware
 │   │   ├── interceptor.py       # Request interception
@@ -545,14 +567,25 @@ Honeypot_Website/
 
 | Method | Endpoint | Description | Auth |
 |--------|----------|-------------|------|
+| GET/POST | `/admin/login` | Admin login | Public |
+| GET | `/admin/logout` | Admin logout | Session |
 | GET | `/admin` | Admin dashboard | SQLi redirect |
+| GET | `/admin/dashboard` | Admin dashboard alias | SQLi redirect |
 | GET | `/admin/users` | User management | SQLi redirect |
 | GET | `/admin/users/<id>` | User detail (IDOR target) | SQLi redirect |
 | GET | `/admin/api-keys` | API key management | SQLi redirect |
+| POST | `/admin/api-keys/create` | Create API key (fake) | SQLi redirect |
+| POST | `/admin/api-keys/validate` | Validate leaked key (fake) | SQLi redirect |
 | GET | `/admin/wallet` | Crypto wallet | SQLi redirect |
+| GET | `/admin/wallet/transactions` | Wallet ledger lure | SQLi redirect |
 | GET | `/admin/config` | Configuration | SQLi redirect |
+| GET | `/admin/config/export` | Unmasked config export lure | SQLi redirect |
 | GET | `/admin/debug` | Debug panel | SQLi redirect |
+| GET | `/admin/debug/config` | Debug config + weak secrets lure | SQLi redirect |
+| POST | `/admin/debug/eval` | Eval simulation (SSTI/command lure) | SQLi redirect |
 | GET | `/admin/database` | Database interface | SQLi redirect |
+| POST | `/admin/database/query` | SQL query simulation | SQLi redirect |
+| GET | `/admin/database/console` | DB console simulation | SQLi redirect |
 | GET | `/admin/logs` | System logs | SQLi redirect |
 | GET | `/admin/settings` | Settings | SQLi redirect |
 
@@ -562,11 +595,14 @@ Honeypot_Website/
 |--------|----------|-------------|
 | GET | `/api/v1/health` | API health check |
 | POST | `/api/v1/auth/login` | API login (injection target) |
-| GET | `/api/v1/users` | Fake user list |
+| GET/POST | `/api/v1/users` | Fake users + mass-assignment simulation |
 | GET | `/api/v1/users/<id>` | Fake user detail (IDOR target) |
+| GET | `/api/v2/internal/users` | Hidden v2 bypass simulation |
 | GET | `/api/internal/config` | Config API (fake) |
 | GET | `/api/internal/users/admin` | Internal admin user data |
 | GET | `/api/internal/metrics` | Internal metrics |
+| GET | `/api/internal/storage` | Internal storage pivot endpoint |
+| GET | `/api/internal/employees` | Employee data lure |
 | GET | `/api/debug/info` | Debug info leak |
 | GET | `/api/debug/errors` | Debug error dump |
 | GET | `/api/debug/routes` | Route enumeration |
@@ -574,6 +610,20 @@ Honeypot_Website/
 | POST | `/api/webhooks/receive` | Webhook callback endpoint |
 | POST | `/api/fetch` | URL fetch (SSRF target) |
 | POST | `/api/v1/upload` | File upload simulation |
+
+### Internal Chain-Gated Endpoints (Honeypot - Port 5000)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/internal/db` | Fake DB cluster data |
+| GET | `/internal/cache` | Fake cache/Redis data |
+| GET | `/internal/admin-service` | Internal admin service gated by leaked key |
+| GET | `/internal/logs` | Internal log stream |
+| GET | `/internal/logs/lateral` | Lateral movement simulation |
+| GET | `/internal/k8s/dashboard` | K8s dashboard lure |
+| GET | `/internal/ci/pipeline` | CI/CD token leak simulation |
+| GET | `/internal/collab/slack` | Internal collaboration leak |
+| GET | `/internal/vault/secrets` | Secrets vault lure |
 
 ### File Endpoints (Honeypot - Port 5000)
 
@@ -606,7 +656,7 @@ Honeypot_Website/
 ### Accessing the Dashboard
 
 ```bash
-python operator_dashboard.py
+python operator_local.py
 ```
 
 Access: http://127.0.0.1:5001
@@ -713,10 +763,10 @@ PORT=5001
 ### Issue: "Operator dashboard shows no sessions"
 
 **Solution:**
-1. Make sure honeypot (run.py) is running
+1. Make sure honeypot (`webapp.py`) is running
 2. Make sure you've browsed the honeypot (generate activity)
 3. Check that `data/operatordata.jsonl` exists
-4. Restart operator dashboard: `python operator_dashboard.py`
+4. Restart operator dashboard: `python operator_local.py`
 5. If traffic appears only in history, increase `OPERATOR_ACTIVE_WINDOW_MINUTES`
 
 ### Issue: "Login doesn't work"
@@ -782,6 +832,6 @@ Unauthorized access to computer systems is illegal. Use this honeypot only on sy
 
 ---
 
-**Last Updated:** March 26, 2026
-**Version:** 1.1
+**Last Updated:** March 30, 2026
+**Version:** 1.2
 **Status:** Production-Ready

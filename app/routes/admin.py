@@ -1,502 +1,538 @@
 """
-Admin Routes - Admin Panel and Dashboard
-
-Simulates a realistic admin panel with various attack surfaces.
-
-INTERNAL DOCUMENTATION:
-- Admin panel is accessible after "successful" SQLi
-- Contains API key management, wallet, file explorer
-- All actions are tracked and logged
-- Fake sensitive data encourages deeper exploration
+Admin Routes - Admin panel deception surfaces.
 """
 
-from flask import Blueprint, render_template, request, jsonify, g, redirect, url_for, session
-import json
-import time
+from __future__ import annotations
+
 import random
 import string
+import time
+
+from flask import Blueprint, Response, g, jsonify, make_response, redirect, render_template, request, session, url_for
+
+from ..deception.constants import (
+    ADMIN_PASSWORD,
+    ADMIN_USERNAME,
+    FAKE_ADMIN_API_KEY,
+    FAKE_AWS_ACCESS_KEY,
+    FAKE_AWS_SECRET_KEY,
+    FAKE_AWS_REGION,
+    FAKE_DB_NAME,
+    FAKE_DB_PASSWORD,
+    FAKE_DB_USER,
+    FAKE_EMPLOYEES,
+    FAKE_INTERNAL_API_KEY,
+    FAKE_JWT_SECRET,
+    FAKE_REDIS_PASSWORD,
+    FAKE_SENDGRID_KEY,
+    FAKE_STRIPE_KEY,
+    build_env_map,
+    fake_users,
+    rate_limit_reset_ts,
+)
 
 
-admin_bp = Blueprint('admin', __name__)
+admin_bp = Blueprint("admin", __name__)
 
-_ADMIN_USERNAME = 'admin'
-_ADMIN_PASSWORD = 'SuperSecureAdmin!2026'
+FAKE_USERS = fake_users(50)
+FAKE_API_KEYS = [
+    {
+        "id": "key_1",
+        "name": "Production API",
+        "key": "cs_prod_" + "".join(random.choices(string.ascii_letters + string.digits, k=32)),
+        "created": "2024-01-15",
+        "last_used": "2024-03-15",
+    },
+    {
+        "id": "key_2",
+        "name": "Staging API",
+        "key": "cs_stag_" + "".join(random.choices(string.ascii_letters + string.digits, k=32)),
+        "created": "2024-02-20",
+        "last_used": "2024-03-10",
+    },
+    {
+        "id": "key_3",
+        "name": "Development API",
+        "key": "cs_dev_" + "".join(random.choices(string.ascii_letters + string.digits, k=32)),
+        "created": "2024-03-01",
+        "last_used": "2024-03-14",
+    },
+]
+
+
+def _inject_attack(attack_type: str, severity: str = "MEDIUM", matched_value: str = "") -> None:
+    entry = {
+        "type": attack_type,
+        "severity": severity,
+        "confidence": 0.95,
+        "matched_pattern": attack_type,
+        "matched_value": matched_value[:200],
+        "field": "route_logic",
+    }
+    if hasattr(g, "detected_attacks") and isinstance(g.detected_attacks, list):
+        g.detected_attacks.append(entry)
+    if hasattr(g, "request_analysis") and isinstance(g.request_analysis, dict):
+        attacks = g.request_analysis.setdefault("detected_attacks", [])
+        if isinstance(attacks, list):
+            attacks.append(entry)
+        g.request_analysis["attack_count"] = len(attacks)
 
 
 def _looks_like_sqli(value: str) -> bool:
-    lowered = str(value or '').lower()
-    markers = ["' or '", ' or 1=1', 'union select', '--', '/*', 'sleep(', 'benchmark(', 'drop table']
+    lowered = str(value or "").lower()
+    markers = ["' or '", " or 1=1", "union select", "--", "/*", "sleep(", "benchmark(", "drop table"]
     return any(marker in lowered for marker in markers)
 
 
-# Fake admin data
-FAKE_USERS = [
-    {'id': 1, 'username': 'admin', 'email': 'admin@cybershield.local', 'role': 'administrator', 'last_login': '2024-03-15 10:23:45'},
-    {'id': 2, 'username': 'john.doe', 'email': 'john.doe@cybershield.local', 'role': 'analyst', 'last_login': '2024-03-14 18:45:22'},
-    {'id': 3, 'username': 'jane.smith', 'email': 'jane.smith@cybershield.local', 'role': 'developer', 'last_login': '2024-03-15 09:12:33'},
-    {'id': 4, 'username': 'mike.wilson', 'email': 'mike.wilson@cybershield.local', 'role': 'analyst', 'last_login': '2024-03-13 14:30:00'},
-    {'id': 5, 'username': 'sarah.jones', 'email': 'sarah.jones@cybershield.local', 'role': 'manager', 'last_login': '2024-03-15 08:00:00'},
-]
+def _rate_limit_headers(response):
+    response.headers["X-RateLimit-Limit"] = "100"
+    response.headers["X-RateLimit-Remaining"] = "12"
+    response.headers["X-RateLimit-Reset"] = rate_limit_reset_ts()
+    return response
 
-FAKE_API_KEYS = [
-    {'id': 'key_1', 'name': 'Production API', 'key': 'cs_prod_' + ''.join(random.choices(string.ascii_letters + string.digits, k=32)), 'created': '2024-01-15', 'last_used': '2024-03-15'},
-    {'id': 'key_2', 'name': 'Staging API', 'key': 'cs_stag_' + ''.join(random.choices(string.ascii_letters + string.digits, k=32)), 'created': '2024-02-20', 'last_used': '2024-03-10'},
-    {'id': 'key_3', 'name': 'Development API', 'key': 'cs_dev_' + ''.join(random.choices(string.ascii_letters + string.digits, k=32)), 'created': '2024-03-01', 'last_used': '2024-03-14'},
-]
+
+def _is_juicy_endpoint_delay(delay_ms: int) -> None:
+    if delay_ms <= 0:
+        return
+    if str(session.get("flask_env", "production")).lower() == "production":
+        time.sleep(delay_ms / 1000.0)
 
 
 @admin_bp.before_request
 def require_admin_login():
-    """Require admin authentication for all admin routes except login."""
-    allowed = {'admin.admin_login', 'admin.admin_logout'}
+    allowed = {"admin.admin_login", "admin.admin_logout", "admin.admin_unlock"}
     if request.endpoint in allowed:
         return None
-    if request.path.rstrip('/') == '/admin/login':
+    if request.path.rstrip("/") in {"/admin/login", "/admin/unlock"}:
         return None
-
-    if not session.get('admin_authenticated'):
-        return redirect(url_for('admin.admin_login', next=request.path))
+    if not session.get("admin_authenticated"):
+        return redirect(url_for("admin.admin_login", next=request.path))
     return None
 
 
-@admin_bp.route('/login', methods=['GET', 'POST'])
+@admin_bp.route("/login", methods=["GET", "POST"])
 def admin_login():
-    """Admin login page. SQLi attempts intentionally grant access for honeypot realism."""
-    if request.method == 'GET':
-        return render_template('admin/login.html')
+    if request.method == "GET":
+        return render_template("admin/login.html")
 
-    username = request.form.get('username', '').strip()
-    password = request.form.get('password', '')
-
+    username = request.form.get("username", "").strip()
+    password = request.form.get("password", "")
     if request.is_json:
         payload = request.get_json(silent=True) or {}
-        username = str(payload.get('username', username)).strip()
-        password = str(payload.get('password', password))
+        username = str(payload.get("username", username)).strip()
+        password = str(payload.get("password", password))
 
-    detected_attacks = g.get('detected_attacks', [])
-    sqli_detected = any(str(a.get('type', '')).startswith('sqli') for a in detected_attacks if isinstance(a, dict))
+    detected_attacks = g.get("detected_attacks", [])
+    sqli_detected = any(str(a.get("type", "")).startswith("sqli") for a in detected_attacks if isinstance(a, dict))
     if not sqli_detected:
         sqli_detected = _looks_like_sqli(username) or _looks_like_sqli(password)
 
-    credential_match = (
-        username.lower() == _ADMIN_USERNAME.lower()
-        and password == _ADMIN_PASSWORD
-    )
+    credential_match = username.lower() == ADMIN_USERNAME.lower() and password == ADMIN_PASSWORD
 
-    if sqli_detected or credential_match:
-        session['admin_authenticated'] = True
-        session['admin_username'] = username or 'admin'
-        next_url = request.args.get('next', '/admin/dashboard')
-        if not str(next_url).startswith('/admin'):
-            next_url = '/admin/dashboard'
+    if sqli_detected:
+        _inject_attack("sqli_classic", "HIGH", f"{username}:{password}")
+        session["admin_2fa_pending"] = True
+        session["mfa_attempts"] = 0
+        return redirect("/verify-2fa")
+
+    if credential_match:
+        session["admin_authenticated"] = True
+        session["admin_username"] = username or "admin"
+        session["admin_login_failures"] = 0
+        next_url = request.args.get("next", "/admin/dashboard")
+        if not str(next_url).startswith("/admin"):
+            next_url = "/admin/dashboard"
         return redirect(next_url)
 
-    return render_template(
-        'admin/login.html',
-        error='Invalid credentials',
-        username=username,
-    ), 401
+    failures = int(session.get("admin_login_failures", 0)) + 1
+    session["admin_login_failures"] = failures
+    if failures >= 5:
+        return (
+            render_template(
+                "admin/login.html",
+                error=(
+                    "Account locked for 10 minutes due to too many failed attempts. "
+                    "Unlock via email or contact admin@cybershield.io"
+                ),
+                username=username,
+            ),
+            401,
+        )
+    return render_template("admin/login.html", error="Invalid credentials", username=username), 401
 
 
-@admin_bp.route('/logout')
+@admin_bp.route("/unlock")
+def admin_unlock():
+    token = request.args.get("token", "")
+    _inject_attack("admin_lockout_bypass_attempt", "CRITICAL", token)
+    return Response(
+        "This unlock token has expired. A new one has been sent to a.novak@cybershield.io",
+        mimetype="text/plain",
+    )
+
+
+@admin_bp.route("/logout")
 def admin_logout():
-    """Admin logout endpoint."""
-    session.pop('admin_authenticated', None)
-    session.pop('admin_username', None)
-    return redirect(url_for('admin.admin_login'))
+    session.pop("admin_authenticated", None)
+    session.pop("admin_username", None)
+    return redirect(url_for("admin.admin_login"))
 
 
-@admin_bp.route('/')
-@admin_bp.route('/dashboard')
+@admin_bp.route("/")
+@admin_bp.route("/dashboard")
 def dashboard():
-    """
-    Admin dashboard - Main admin interface.
-    
-    INTERNAL: Shows fake but realistic dashboard data.
-    """
     stats = {
-        'total_users': 1247,
-        'active_sessions': 89,
-        'api_calls_today': 45672,
-        'revenue_mtd': 127450.00,
-        'alerts': 3,
-        'pending_tasks': 12
+        "total_users": 1247,
+        "active_sessions": 89,
+        "api_calls_today": 45672,
+        "revenue_mtd": 127450.00,
+        "alerts": 3,
+        "pending_tasks": 12,
     }
-    
     recent_activity = [
-        {'time': '10:23:45', 'user': 'admin', 'action': 'Login', 'ip': '192.168.1.100'},
-        {'time': '10:15:22', 'user': 'john.doe', 'action': 'API Key Generated', 'ip': '10.0.0.45'},
-        {'time': '09:45:18', 'user': 'system', 'action': 'Backup Completed', 'ip': 'localhost'},
-        {'time': '09:30:00', 'user': 'jane.smith', 'action': 'Config Updated', 'ip': '10.0.0.67'},
+        {"time": "10:23:45", "user": "admin", "action": "Login", "ip": "192.168.1.100"},
+        {"time": "10:15:22", "user": "john.doe", "action": "API Key Generated", "ip": "10.0.0.45"},
+        {"time": "09:45:18", "user": "system", "action": "Backup Completed", "ip": "localhost"},
+        {"time": "09:30:00", "user": "jane.smith", "action": "Config Updated", "ip": "10.0.0.67"},
     ]
-    
-    return render_template('admin/dashboard.html', stats=stats, activity=recent_activity)
+    return render_template(
+        "admin/dashboard.html",
+        stats=stats,
+        activity=recent_activity,
+        security_alert=(
+            "Security Alert: 3 failed login attempts detected on your account from "
+            "185.220.101.x (Tor exit node) at 14:32 UTC. Not you? Review activity."
+        ),
+        last_login="Previous session: 2 hours ago from 10.0.1.1 (internal) — Review",
+    )
 
 
-@admin_bp.route('/users')
+@admin_bp.route("/users")
 def users():
-    """
-    User management - IDOR target.
-    
-    INTERNAL: User IDs are exposed for IDOR testing.
-    """
-    return render_template('admin/users.html', users=FAKE_USERS)
+    resp = make_response(render_template("admin/users.html", users=FAKE_USERS))
+    return _rate_limit_headers(resp)
 
 
-@admin_bp.route('/users/<int:user_id>')
+@admin_bp.route("/users/<int:user_id>")
 def user_detail(user_id):
-    """
-    User detail page - IDOR vulnerable endpoint.
-    
-    INTERNAL: Returns different user data based on ID.
-    This simulates IDOR vulnerability.
-    """
-    # Find user by ID
-    user = next((u for u in FAKE_USERS if u['id'] == user_id), None)
-    
+    user = next((u for u in FAKE_USERS if int(u.get("id", -1)) == user_id), None)
     if not user:
-        # Generate fake user for any ID (makes IDOR seem successful)
         user = {
-            'id': user_id,
-            'username': f'user_{user_id}',
-            'email': f'user{user_id}@cybershield.local',
-            'role': 'user',
-            'last_login': '2024-03-10 12:00:00',
-            'phone': '+1-555-' + str(user_id).zfill(4)[-4:],
-            'address': f'{user_id * 10} Fake Street',
-            'ssn_last_four': str(user_id * 1234)[-4:],
-            'api_key': 'cs_user_' + ''.join(random.choices(string.ascii_letters, k=24))
+            "id": user_id,
+            "username": f"user_{user_id}",
+            "email": f"user{user_id}@cybershield.io",
+            "role": "user",
+            "last_login": "2024-03-10 12:00:00",
+            "phone": "+1-555-" + str(user_id).zfill(4)[-4:],
+            "address": f"{user_id * 10} Fake Street",
+            "ssn_last_four": str(user_id * 1234)[-4:],
+            "api_key": "cs_user_" + "".join(random.choices(string.ascii_letters, k=24)),
         }
-    
-    return render_template('admin/user_detail.html', user=user)
+    resp = make_response(render_template("admin/user_detail.html", user=user))
+    return _rate_limit_headers(resp)
 
 
-@admin_bp.route('/api-keys')
+@admin_bp.route("/api-keys")
 def api_keys():
-    """
-    API Key management page.
-    """
-    return render_template('admin/api_keys.html', keys=FAKE_API_KEYS)
+    return render_template("admin/api_keys.html", keys=FAKE_API_KEYS)
 
 
-@admin_bp.route('/api-keys/create', methods=['POST'])
+@admin_bp.route("/api-keys/create", methods=["POST"])
 def create_api_key():
-    """Create new API key (fake)."""
-    name = request.form.get('name', 'New Key')
+    name = request.form.get("name", "New Key")
     new_key = {
-        'id': f'key_{len(FAKE_API_KEYS) + 1}',
-        'name': name,
-        'key': 'cs_new_' + ''.join(random.choices(string.ascii_letters + string.digits, k=32)),
-        'created': '2024-03-15',
-        'last_used': 'Never'
+        "id": f"key_{len(FAKE_API_KEYS) + 1}",
+        "name": name,
+        "key": "cs_new_" + "".join(random.choices(string.ascii_letters + string.digits, k=32)),
+        "created": "2024-03-15",
+        "last_used": "Never",
     }
-    return jsonify({'status': 'success', 'key': new_key})
+    return jsonify({"status": "success", "key": new_key})
 
 
-@admin_bp.route('/api-keys/validate', methods=['POST'])
+@admin_bp.route("/api-keys/validate", methods=["POST"])
 def validate_api_key():
-    """Validate leaked or discovered API key against fake internal scopes."""
-    key = request.form.get('key', '')
+    key = request.form.get("key", "")
     if request.is_json:
         payload = request.get_json(silent=True) or {}
-        key = payload.get('key', key)
+        key = payload.get("key", key)
+    key_lower = str(key).lower()
+    if "adminkey" in key_lower or "cs_admin" in key_lower or FAKE_INTERNAL_API_KEY in key_lower:
+        return jsonify(
+            {
+                "status": "success",
+                "scope": ["admin:*", "vault:read", "db:read"],
+                "next": [f"/internal/admin-service?x-internal-key={FAKE_INTERNAL_API_KEY}"],
+            }
+        )
+    return jsonify({"status": "error", "message": "invalid key"}), 401
 
-    key_lower = key.lower()
-    if 'adminkey' in key_lower or 'cs_admin' in key_lower:
-        return jsonify({
-            'status': 'success',
-            'scope': ['admin:*', 'vault:read', 'db:read'],
-            'next': ['/internal/admin-service?x-internal-key=adminkey_int_7fce381d']
-        })
 
-    return jsonify({'status': 'error', 'message': 'invalid key'}), 401
-
-
-@admin_bp.route('/wallet')
+@admin_bp.route("/wallet")
 def wallet():
-    """
-    Crypto wallet page - High-value target.
-    
-    INTERNAL: Shows fake crypto balances and wallet addresses.
-    """
     wallets = {
-        'btc': {
-            'address': '1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa',
-            'balance': 2.45678,
-            'usd_value': 156789.45
-        },
-        'eth': {
-            'address': '0x742d35Cc6634C0532925a3b844Bc9e7595f12345',
-            'balance': 45.892,
-            'usd_value': 145678.90
-        },
-        'usdt': {
-            'address': 'TN3W4H6rK2ce4vX9YnFQHwKENnHjoxb3m9',
-            'balance': 250000.00,
-            'usd_value': 250000.00
+        "eth": {
+            "address_hot": "0x742d35Cc6634C0532925a3b844Bc9e7595f12345",
+            "address_cold": "0x8f39f19f2f5f055d8ac95ca0fbb3fb16d5f4a212",
+            "balance": 14.7231,
+            "usd_value": 47000.00,
         }
     }
-    
     transactions = [
-        {'date': '2024-03-14', 'type': 'Received', 'amount': '0.5 BTC', 'from': '3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy'},
-        {'date': '2024-03-12', 'type': 'Sent', 'amount': '10 ETH', 'to': '0x89205A3A3b2A69De6Dbf7f01ED13B2108B2c43e7'},
-        {'date': '2024-03-10', 'type': 'Received', 'amount': '50000 USDT', 'from': 'Internal Transfer'},
+        {"date": "2024-03-14", "type": "Sent", "amount": "0.8 ETH", "to": "contractor payout"},
+        {"date": "2024-03-12", "type": "Sent", "amount": "0.5 ETH", "to": "unknown address — investigation pending"},
+        {"date": "2024-03-10", "type": "Sent", "amount": "1.2 ETH", "to": "Q1 bug bounty payout — do not discuss externally"},
     ]
-    
-    return render_template('admin/wallet.html', wallets=wallets, transactions=transactions)
+    return render_template("admin/wallet.html", wallets=wallets, transactions=transactions)
 
 
-@admin_bp.route('/wallet/transactions')
+@admin_bp.route("/wallet/transactions")
 def wallet_transactions():
-    """Detailed transaction ledger used as a high-value data lure."""
-    return jsonify({
-        'status': 'success',
-        'ledger': [
-            {'tx': '0xabc102', 'asset': 'BTC', 'amount': 0.83, 'to': 'cold-vault-1', 'approved_by': 'ops.breakglass'},
-            {'tx': '0xabc103', 'asset': 'ETH', 'amount': 12.4, 'to': 'hot-wallet-7', 'approved_by': 'finance.lead'},
-            {'tx': '0xabc104', 'asset': 'USDT', 'amount': 95000.0, 'to': 'vendor-clearing', 'approved_by': 'payroll.bot'},
-        ],
-        'next': ['/internal/logs', '/internal/vault/secrets']
-    })
+    ledger = []
+    for i in range(40):
+        emp = FAKE_EMPLOYEES[i % len(FAKE_EMPLOYEES)]
+        note = "Contractor payout"
+        if i == 4:
+            note = "Q1 bug bounty payout — do not discuss externally"
+        if i == 7:
+            note = "0.5 ETH to unknown address — investigation pending"
+        ledger.append(
+            {
+                "tx": f"0xabc{100 + i}",
+                "asset": "ETH",
+                "amount": round(random.uniform(0.05, 1.4), 4),
+                "to": emp["name"],
+                "note": note,
+            }
+        )
+    return jsonify({"status": "success", "ledger": ledger})
 
 
-@admin_bp.route('/config')
+@admin_bp.route("/wallet/withdraw", methods=["POST"])
+def wallet_withdraw():
+    _inject_attack("crypto_theft_attempt", "CRITICAL", request.get_data(as_text=True))
+    _is_juicy_endpoint_delay(3000)
+    return jsonify(
+        {
+            "status": "pending_compliance",
+            "message": (
+                "Withdrawal of 14.72 ETH initiated. Pending automated compliance review (2-4 hours). "
+                "A confirmation will be sent to j.okafor@cybershield.io."
+            ),
+            "transaction_id": "tx_pending_a9f3c2b1",
+        }
+    )
+
+
+@admin_bp.route("/config")
 def config():
-    """
-    Configuration panel - Shows fake system config.
-    
-    INTERNAL: Exposes "sensitive" configuration data.
-    """
     config_data = {
-        'database': {
-            'host': 'db.internal.cybershield.local',
-            'port': 3306,
-            'name': 'cybershield_prod',
-            'user': 'cs_admin',
-            'password': '********'  # Shown as masked
-        },
-        'redis': {
-            'host': 'cache.internal.cybershield.local',
-            'port': 6379,
-            'password': '********'
-        },
-        'aws': {
-            'region': 'us-east-1',
-            'bucket': 'cybershield-production',
-            'access_key': 'FAKE_AWS_KEY_REDACTED',
-            'secret_key': '********'
-        },
-        'jwt': {
-            'algorithm': 'HS256',
-            'expiry': 3600,
-            'secret': '********'
-        }
+        "database": {"host": "db.internal.cybershield.io", "port": 5432, "name": FAKE_DB_NAME, "user": FAKE_DB_USER, "password": "********"},
+        "redis": {"host": "cache.internal.cybershield.io", "port": 6379, "password": "********"},
+        "aws": {"region": FAKE_AWS_REGION, "bucket": "cybershield-production", "access_key": "REDACTED", "secret_key": "********"},
+        "jwt": {"algorithm": "HS256", "expiry": 3600, "secret": "********"},
     }
-    
-    return render_template('admin/config.html', config=config_data)
+    return render_template("admin/config.html", config=config_data)
 
 
-@admin_bp.route('/config/export')
+@admin_bp.route("/config/export")
 def config_export():
-    """
-    Export configuration - Returns full config.
-    
-    INTERNAL: This endpoint "accidentally" returns unmasked credentials.
-    """
-    detected_attacks = g.get('detected_attacks', [])
-    
-    # Full config with "secrets"
+    _is_juicy_endpoint_delay(3000)
     full_config = {
-        'database': {
-            'host': 'db.internal.cybershield.local',
-            'port': 3306,
-            'name': 'cybershield_prod',
-            'user': 'cs_admin',
-            'password': 'Pr0d_DB_P@ssw0rd_2024!'
-        },
-        'redis': {
-            'host': 'cache.internal.cybershield.local',
-            'port': 6379,
-            'password': 'R3d1s_C@che_P@ss!'
-        },
-        'aws': {
-            'region': 'us-east-1',
-            'bucket': 'cybershield-production',
-            'access_key': 'FAKE_AWS_KEY_EXAMPLE',
-            'secret_key': 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'
-        },
-        'jwt': {
-            'algorithm': 'HS256',
-            'expiry': 3600,
-            'secret': 'super_secret_jwt_key_production_2024'
-        },
-        'admin': {
-            'email': 'admin@cybershield.local',
-            'default_password': 'Ch@ngeM3_2024!'
-        }
+        "database": {"host": "db.internal.cybershield.io", "port": 5432, "name": FAKE_DB_NAME, "user": FAKE_DB_USER, "password": FAKE_DB_PASSWORD},
+        "redis": {"host": "cache.internal.cybershield.io", "port": 6379, "password": FAKE_REDIS_PASSWORD},
+        "aws": {"region": FAKE_AWS_REGION, "access_key": FAKE_AWS_ACCESS_KEY, "secret_key": FAKE_AWS_SECRET_KEY},
+        "jwt": {"algorithm": "HS256", "expiry": 3600, "secret": FAKE_JWT_SECRET},
+        "services": {"stripe_key": FAKE_STRIPE_KEY, "sendgrid_key": FAKE_SENDGRID_KEY, "admin_api_key": FAKE_ADMIN_API_KEY},
+        "all_env": build_env_map(),
     }
-    
-    return jsonify(full_config)
+    return Response(
+        jsonify(full_config).get_data(as_text=False),
+        mimetype="application/json",
+        headers={"Content-Disposition": 'attachment; filename="cybershield-config-export-2024-01-15.json"'},
+    )
 
 
-@admin_bp.route('/debug')
+@admin_bp.route("/debug")
 def debug():
-    """
-    Debug panel - Template injection target.
-    
-    INTERNAL: This endpoint pretends to be a debug interface.
-    """
     debug_info = {
-        'server_time': time.strftime('%Y-%m-%d %H:%M:%S'),
-        'python_version': '3.9.7',
-        'flask_version': '3.0.0',
-        'environment': 'production',
-        'debug_mode': False,
-        'memory_usage': '245 MB',
-        'cpu_usage': '12%',
-        'active_connections': 89,
-        'cache_size': '1.2 GB'
+        "server_time": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "python_version": "3.9.7",
+        "flask_version": "3.0.0",
+        "environment": "production",
+        "debug_mode": False,
+        "memory_usage": "245 MB",
+        "cpu_usage": "12%",
+        "active_connections": 89,
+        "cache_size": "1.2 GB",
     }
-    
-    return render_template('admin/debug.html', debug_info=debug_info)
+    return render_template("admin/debug.html", debug_info=debug_info)
 
 
-@admin_bp.route('/debug/config')
+@admin_bp.route("/debug/config")
 def debug_config_export():
-    """Debug config export with intentionally weak secrets for JWT/key abuse chains."""
-    return jsonify({
-        'status': 'success',
-        'debug_mode': False,
-        'jwt': {
-            'algorithm': 'HS256',
-            'weak_secret': 'debug-weak-secret-2026',
-            'example_forged_token': 'Bearer forged_admin_token'
-        },
-        'internal_keys': {
-            'admin_service_key': 'adminkey_int_7fce381d',
-            'storage_read_key': 'stor_key_1f23b8bb'
-        },
-        'next': ['/api/v2/internal/users?token=forged_admin_token', '/internal/admin-service?x-internal-key=adminkey_int_7fce381d']
-    })
+    return jsonify(
+        {
+            "status": "success",
+            "debug_mode": False,
+            "jwt": {"algorithm": "HS256", "weak_secret": FAKE_JWT_SECRET, "example_forged_token": "Bearer forged_admin_token"},
+            "internal_keys": {"admin_service_key": FAKE_INTERNAL_API_KEY, "storage_read_key": "stor_key_1f23b8bb"},
+            "next": ["/api/v2/internal/users?token=forged_admin_token", f"/internal/admin-service?x-internal-key={FAKE_INTERNAL_API_KEY}"],
+        }
+    )
 
 
-@admin_bp.route('/debug/eval', methods=['POST'])
+def _fake_subclasses_output() -> str:
+    classes = [f"<class 'object_{i}'>" for i in range(1, 301)]
+    return "[" + ", ".join(classes) + "]"
+
+
+@admin_bp.route("/debug/eval", methods=["POST"])
 def debug_eval():
-    """
-    Debug eval endpoint - Command injection target.
-    
-    INTERNAL: Appears to execute Python code but returns fake output.
-    """
-    code = request.form.get('code', '')
-    
-    # Check for detected attacks
-    detected_attacks = g.get('detected_attacks', [])
-    
-    if any(a.get('type') == 'command_injection' for a in detected_attacks):
-        # Return fake shell output
-        return jsonify({
-            'status': 'success',
-            'output': 'uid=33(www-data) gid=33(www-data) groups=33(www-data)'
-        })
-    
-    if any(a.get('type', '').startswith('ssti') for a in detected_attacks):
-        # Return fake template injection result
-        if '7*7' in code or '7*6' in code:
-            return jsonify({'status': 'success', 'output': '49'})
-        if 'config' in code.lower():
-            return jsonify({
-                'status': 'success',
-                'output': "<Config {'DEBUG': False, 'SECRET_KEY': 'prod-key', 'DATABASE_URI': '...'}>"}
-            )
-    
-    return jsonify({'status': 'error', 'message': 'Invalid expression'})
+    code = request.form.get("code", "")
+    if request.is_json:
+        code = str((request.get_json(silent=True) or {}).get("code", code))
+
+    _is_juicy_endpoint_delay(2000)
+    lowered = code.lower()
+
+    def ssti(out: str):
+        _inject_attack("ssti_attempt", "HIGH", code)
+        return jsonify({"status": "success", "output": out})
+
+    def rce(out: str):
+        _inject_attack("rce_attempt", "CRITICAL", code)
+        return jsonify({"status": "success", "output": out})
+
+    if "{{7*7}}" in code or "{{49}}" in code or "7*7" in lowered:
+        return ssti("49")
+    if "config" in lowered:
+        return ssti(str(build_env_map()))
+    if "request" in lowered:
+        return ssti("<Request 'https://cybershield.io/admin/debug/eval' [POST]>")
+    if "join(" in lowered:
+        return ssti("".join([c for c in code if c.isalnum()][:64]))
+    if "__class__.__mro__" in lowered:
+        return ssti("(<class 'str'>, <class 'object'>)")
+    if "__subclasses__" in lowered:
+        return ssti(_fake_subclasses_output())
+    if "import " in lowered or "__import__" in lowered:
+        return jsonify({"status": "error", "message": "NameError: name '__import__' is not defined in sandbox"}), 400
+    if "subprocess" in lowered or "os.system" in lowered:
+        return rce(
+            "[Sandbox] Command executed in restricted environment\n"
+            "uid=33(www-data) gid=33(www-data) groups=33(www-data)"
+        )
+    if "open(" in lowered:
+        return rce("Permission denied")
+
+    detected_attacks = g.get("detected_attacks", [])
+    if any(a.get("type") == "command_injection" for a in detected_attacks):
+        return rce("uid=33(www-data) gid=33(www-data) groups=33(www-data)")
+    if any(str(a.get("type", "")).startswith("ssti") for a in detected_attacks):
+        return ssti("49")
+    return jsonify({"status": "error", "message": "Invalid expression"})
 
 
-@admin_bp.route('/database')
+@admin_bp.route("/database")
 def database():
-    """
-    Database management page.
-    """
     tables = [
-        {'name': 'users', 'rows': 12847, 'size': '45 MB'},
-        {'name': 'sessions', 'rows': 89234, 'size': '128 MB'},
-        {'name': 'transactions', 'rows': 456789, 'size': '892 MB'},
-        {'name': 'api_logs', 'rows': 2345678, 'size': '2.1 GB'},
-        {'name': 'audit_logs', 'rows': 567890, 'size': '456 MB'},
-        {'name': 'config', 'rows': 234, 'size': '1.2 MB'},
+        {"name": "users", "rows": 2847, "size": "45 MB"},
+        {"name": "transactions", "rows": 456789, "size": "892 MB"},
+        {"name": "api_keys", "rows": 1289, "size": "12 MB"},
+        {"name": "sessions", "rows": 89234, "size": "128 MB"},
+        {"name": "audit_log", "rows": 567890, "size": "456 MB"},
+        {"name": "config", "rows": 234, "size": "1.2 MB"},
+        {"name": "employees", "rows": 93, "size": "4 MB"},
+        {"name": "secrets", "rows": 7, "size": "28 KB"},
+        {"name": "encryption_keys", "rows": 5, "size": "14 KB"},
     ]
-    
-    return render_template('admin/database.html', tables=tables)
+    return render_template("admin/database.html", tables=tables)
 
 
-@admin_bp.route('/database/query', methods=['POST'])
+def _paginate(rows, page: int, limit: int):
+    start = max(0, (page - 1) * limit)
+    end = start + limit
+    return rows[start:end]
+
+
+@admin_bp.route("/database/query", methods=["POST"])
 def database_query():
-    """
-    Database query endpoint - SQL injection target.
-    
-    INTERNAL: Returns fake query results.
-    """
-    query = request.form.get('query', '').lower()
-    
-    # Check for SQL injection
-    detected_attacks = g.get('detected_attacks', [])
-    
-    if any(a.get('type', '').startswith('sqli') for a in detected_attacks):
-        # Return fake data based on query
-        if 'users' in query:
-            return jsonify({
-                'status': 'success',
-                'columns': ['id', 'username', 'email', 'password_hash', 'role'],
-                'rows': [
-                    [1, 'admin', 'admin@cybershield.local', '$2b$12$fakehash1234567890abcdef', 'administrator'],
-                    [2, 'john', 'john@cybershield.local', '$2b$12$anotherfakehash12345678', 'analyst'],
-                    [3, 'jane', 'jane@cybershield.local', '$2b$12$yetanotherfakehash12345', 'developer'],
-                ]
-            })
-        
-        return jsonify({
-            'status': 'success',
-            'columns': ['id', 'data'],
-            'rows': [[1, 'Query executed successfully']]
-        })
-    
-    return jsonify({'status': 'error', 'message': 'Query validation failed'})
+    query = request.form.get("query", "")
+    if request.is_json:
+        query = str((request.get_json(silent=True) or {}).get("query", query))
+    q = query.lower()
+    page = int(request.args.get("page", "1"))
+    limit = int(request.args.get("limit", "10"))
+
+    if "show tables" in q:
+        return jsonify({"status": "success", "rows": ["users", "transactions", "api_keys", "sessions", "audit_log", "config", "employees", "secrets", "encryption_keys"]})
+    if "select @@version" in q:
+        return jsonify({"status": "success", "rows": [["8.0.32-MySQL Community Server"]]})
+    if "select user()" in q:
+        return jsonify({"status": "success", "rows": [[f"{FAKE_DB_USER}@localhost"]]})
+    if "select @@datadir" in q:
+        return jsonify({"status": "success", "rows": [["/var/lib/mysql/"]]})
+    if "select * from secrets" in q:
+        return jsonify({"status": "error", "message": "ERROR 1142: SELECT command denied to user 'cs_app'@'localhost' for table 'secrets'"})
+    if "select * from encryption_keys" in q:
+        _inject_attack("rce_attempt", "CRITICAL", query)
+        return jsonify({"status": "error", "message": "ERROR 1142: SELECT command denied to user 'cs_app'@'localhost' for table 'encryption_keys'"})
+    if "drop table" in q or "delete from" in q:
+        _inject_attack("rce_attempt", "CRITICAL", query)
+        return jsonify({"status": "success", "message": "Query OK, 0 rows affected (0.00 sec)"})
+    if "insert into users" in q:
+        return jsonify({"status": "success", "message": "Query OK, 1 row inserted"})
+    if "select * from employees" in q:
+        rows = [{**emp, "salary": 120000 + (idx * 7000)} for idx, emp in enumerate(FAKE_EMPLOYEES)]
+        return jsonify({"status": "success", "rows": rows})
+
+    if "select * from transactions" in q:
+        tx_rows = [{"id": i + 1, "asset": "ETH", "amount": round(random.uniform(0.04, 2.4), 4)} for i in range(30)]
+        return jsonify({"status": "success", "rows": tx_rows})
+
+    if "select * from users" in q or "union select" in q:
+        paged = _paginate(FAKE_USERS, page, limit)
+        payload = {"status": "success", "rows": paged, "pagination": {"page": page, "limit": limit, "total": len(FAKE_USERS)}}
+        resp = jsonify(payload)
+        return _rate_limit_headers(resp)
+
+    return jsonify({"status": "success", "columns": ["id", "data"], "rows": [[1, "Query executed successfully"]]})
 
 
-@admin_bp.route('/database/console')
+@admin_bp.route("/database/console")
 def database_console():
-    """Fake interactive database console endpoint."""
-    query = request.args.get('q', 'select id,username,role from users limit 3')
-    return jsonify({
-        'status': 'success',
-        'engine': 'postgresql 14.9',
-        'query': query,
-        'rows': [
-            {'id': 1, 'username': 'admin', 'role': 'administrator'},
-            {'id': 7, 'username': 'svc.sync', 'role': 'service'},
-            {'id': 9, 'username': 'ops.breakglass', 'role': 'security'},
-        ],
-        'next': ['/internal/db?table=employees', '/internal/vault/secrets']
-    })
+    query = request.args.get("q", "select id,username,role from users limit 3")
+    return jsonify(
+        {
+            "status": "success",
+            "engine": "postgresql 14.9",
+            "query": query,
+            "rows": [
+                {"id": 1, "username": "admin", "role": "administrator"},
+                {"id": 7, "username": "svc.sync", "role": "service"},
+                {"id": 9, "username": "ops.breakglass", "role": "security"},
+            ],
+            "next": ["/internal/db?table=employees", "/internal/vault/secrets"],
+        }
+    )
 
 
-@admin_bp.route('/logs')
+@admin_bp.route("/logs")
 def logs():
-    """
-    Log viewer page.
-    """
     fake_logs = [
-        {'timestamp': '2024-03-15 10:25:34', 'level': 'INFO', 'message': 'User admin logged in from 192.168.1.100'},
-        {'timestamp': '2024-03-15 10:24:12', 'level': 'WARNING', 'message': 'Failed login attempt for user admin from 10.0.0.45'},
-        {'timestamp': '2024-03-15 10:22:45', 'level': 'INFO', 'message': 'API key cs_prod_xxx generated by admin'},
-        {'timestamp': '2024-03-15 10:20:00', 'level': 'ERROR', 'message': 'Database connection timeout - retrying'},
-        {'timestamp': '2024-03-15 10:15:30', 'level': 'INFO', 'message': 'Scheduled backup started'},
+        {"timestamp": "2024-01-14 03:47:22", "level": "ALERT", "message": "Unusual login from IP 185.220.101.x (Tor exit node) — user: api_service_account"},
+        {"timestamp": "2024-01-14 03:51:09", "level": "INFO", "message": "/api/internal/config accessed — api_service_account"},
+        {"timestamp": "2024-01-14 03:52:44", "level": "INFO", "message": "/internal/vault/secrets accessed — api_service_account"},
+        {"timestamp": "2024-01-14 03:54:01", "level": "CRITICAL", "message": "Large data export initiated — api_service_account — 2.3GB"},
+        {"timestamp": "2024-01-14 03:55:12", "level": "INFO", "message": "Session terminated"},
+        {"timestamp": "2024-01-09 11:22:05", "level": "INFO", "message": "JWT secret rotated by a.novak@cybershield.io"},
+        {"timestamp": "2024-01-03 08:00:00", "level": "INFO", "message": "Scheduled backup completed — cybershield-backups-private/db_backup_2024-01-03.sql.gz"},
+        {"timestamp": "2023-12-28 22:14:55", "level": "WARN", "message": "/admin/debug/eval accessed outside business hours — m.torres@cybershield.io"},
     ]
-    
-    return render_template('admin/logs.html', logs=fake_logs)
+    return render_template("admin/logs.html", logs=fake_logs)
 
 
-@admin_bp.route('/settings')
+@admin_bp.route("/settings")
 def settings():
-    """Admin settings page."""
-    return render_template('admin/settings.html')
+    return render_template("admin/settings.html")

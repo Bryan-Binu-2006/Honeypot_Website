@@ -419,6 +419,9 @@ def _session_rows(
                 "asset_requests": _safe_int(data.get("asset_requests"), 0),
                 "interaction_requests": _safe_int(data.get("interaction_requests"), 0),
                 "recent_actions": actions.get(sid, []),
+                "discovery_score": _safe_int(data.get("discovery_score"), 0),
+                "attacker_profile": str(data.get("attacker_profile", "unknown")),
+                "canary_triggered": bool(data.get("canary_triggered", False)),
             }
         )
 
@@ -458,6 +461,9 @@ def process_event(event: Dict[str, Any]) -> None:
             "attack_types": [],
             "asset_requests": 0,
             "interaction_requests": 0,
+            "discovery_score": 0,
+            "attacker_profile": "unknown",
+            "canary_triggered": False,
         }
 
     session_data = _sessions[session_id]
@@ -489,6 +495,44 @@ def process_event(event: Dict[str, Any]) -> None:
         event.get("time_spent_seconds", session_data.get("time_spent_seconds", 0))
     )
 
+    detected = event.get("detected_attacks", [])
+    if isinstance(detected, list):
+        points = 0
+        for attack in detected:
+            if not isinstance(attack, dict):
+                continue
+            atype = str(attack.get("type", ""))
+            if atype == "recon_probe" and endpoint in {"/.env", "/CHANGELOG.md", "/api/swagger.json"}:
+                points += 10
+            if atype.startswith("sqli"):
+                points += 10
+            if atype == "mfa_bypass_attempt":
+                points += 20
+            if atype == "cloud_credential_theft":
+                points += 30
+            if atype == "rce_attempt":
+                points += 40
+            if atype == "webshell_command":
+                points += 50
+            if atype.startswith("canary_"):
+                points += 50
+        session_data["discovery_score"] = _safe_int(session_data.get("discovery_score"), 0) + points
+        if any(isinstance(a, dict) and str(a.get("type", "")).startswith("canary_") for a in detected):
+            session_data["canary_triggered"] = True
+
+    score = _safe_int(session_data.get("discovery_score"), 0)
+    attacks_so_far = set(str(v).lower() for v in session_data.get("attack_types", []))
+    if score >= 100:
+        session_data["attacker_profile"] = "nation_state_apt"
+    elif "crypto_theft_attempt" in attacks_so_far:
+        session_data["attacker_profile"] = "opportunistic_criminal"
+    elif any(v.startswith("sqli") for v in attacks_so_far) and score < 30:
+        session_data["attacker_profile"] = "script_kiddie"
+    elif score >= 40:
+        session_data["attacker_profile"] = "bug_bounty_hunter"
+    else:
+        session_data["attacker_profile"] = "unknown"
+
     incoming_path = event.get("chain_attack_path", [])
     if isinstance(incoming_path, list) and incoming_path:
         session_data["chain_attack_path"] = list(incoming_path)
@@ -503,7 +547,6 @@ def process_event(event: Dict[str, Any]) -> None:
     else:
         session_data["interaction_requests"] += 1
 
-    detected = event.get("detected_attacks", [])
     if isinstance(detected, list):
         session_data["attacks_detected"] += len(detected)
         for attack in detected:
@@ -594,6 +637,9 @@ def load_events_from_file() -> None:
                         "attack_types": [],
                         "asset_requests": 0,
                         "interaction_requests": 0,
+                        "discovery_score": 0,
+                        "attacker_profile": "unknown",
+                        "canary_triggered": False,
                     }
 
                 session_data = sessions_local[session_id]
@@ -621,6 +667,46 @@ def load_events_from_file() -> None:
                 session_data["time_spent_seconds"] = _safe_int(
                     event.get("time_spent_seconds", session_data.get("time_spent_seconds", 0))
                 )
+                detected = event.get("detected_attacks", [])
+                if isinstance(detected, list):
+                    points = 0
+                    endpoint = str(event.get("endpoint", "/"))
+                    for attack in detected:
+                        if not isinstance(attack, dict):
+                            continue
+                        atype = str(attack.get("type", ""))
+                        if atype == "recon_probe" and endpoint in {"/.env", "/CHANGELOG.md", "/api/swagger.json"}:
+                            points += 10
+                        if atype.startswith("sqli"):
+                            points += 10
+                        if atype == "mfa_bypass_attempt":
+                            points += 20
+                        if atype == "cloud_credential_theft":
+                            points += 30
+                        if atype == "rce_attempt":
+                            points += 40
+                        if atype == "webshell_command":
+                            points += 50
+                        if atype.startswith("canary_"):
+                            points += 50
+                    session_data["discovery_score"] = _safe_int(session_data.get("discovery_score"), 0) + points
+                    if any(
+                        isinstance(a, dict) and str(a.get("type", "")).startswith("canary_")
+                        for a in detected
+                    ):
+                        session_data["canary_triggered"] = True
+                score = _safe_int(session_data.get("discovery_score"), 0)
+                attacks_so_far = set(str(v).lower() for v in session_data.get("attack_types", []))
+                if score >= 100:
+                    session_data["attacker_profile"] = "nation_state_apt"
+                elif "crypto_theft_attempt" in attacks_so_far:
+                    session_data["attacker_profile"] = "opportunistic_criminal"
+                elif any(v.startswith("sqli") for v in attacks_so_far) and score < 30:
+                    session_data["attacker_profile"] = "script_kiddie"
+                elif score >= 40:
+                    session_data["attacker_profile"] = "bug_bounty_hunter"
+                else:
+                    session_data["attacker_profile"] = "unknown"
                 incoming_path = event.get("chain_attack_path", [])
                 if isinstance(incoming_path, list) and incoming_path:
                     session_data["chain_attack_path"] = list(incoming_path)
@@ -1136,6 +1222,12 @@ DASHBOARD_HTML = """
                     + '<div class="metric">Session age: <b>' + esc(ago(s.age_seconds)) + '</b></div>'
                     + '<div class="metric">Skill: <b>' + esc(s.skill_level || 'basic') + '</b></div>'
                     + '<div class="metric">Chain score: <b>' + esc(Math.round((Number(s.chain_progression || 0)) * 100) + '%') + '</b></div>'
+                    + '</div>'
+                    + '<div class="metrics">'
+                    + '<div class="metric">Discovery: <b>' + esc(s.discovery_score || 0) + '</b></div>'
+                    + '<div class="metric">Profile: <b>' + esc(s.attacker_profile || 'unknown') + '</b></div>'
+                    + '<div class="metric">Canary: <b>' + esc((s.canary_triggered ? 'yes' : 'no')) + '</b></div>'
+                    + '<div class="metric">Stage: <b>' + esc(s.chain_stage || s.stage) + '</b></div>'
                     + '</div>'
                     + '<div class="chain">' + esc(chainPath) + '</div>'
                     + '<div class="chain">' + esc(attackViz) + '</div>'
