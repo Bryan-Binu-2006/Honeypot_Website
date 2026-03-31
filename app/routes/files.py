@@ -27,7 +27,7 @@ FAKE_FILESYSTEM = {
     '/home': ['admin', 'deploy', 'www-data'],
     '/home/admin': ['.bashrc', '.ssh', 'backups', 'scripts'],
     '/home/admin/.ssh': ['id_rsa', 'id_rsa.pub', 'authorized_keys', 'known_hosts'],
-    '/home/admin/backups': ['db_backup_2024.sql', 'config_backup.tar.gz', 'users_export.csv'],
+    '/home/admin/backups': ['db_backup_2026.sql', 'config_backup.tar.gz', 'users_export.csv'],
     '/etc': ['passwd', 'shadow', 'hosts', 'nginx', 'mysql', 'ssh'],
     '/etc/nginx': ['nginx.conf', 'sites-enabled', 'ssl'],
     '/etc/mysql': ['my.cnf', 'debian.cnf'],
@@ -83,7 +83,7 @@ DB_HOST=db.internal.cybershield.local
 DB_PORT=3306
 DB_DATABASE=cybershield_production
 DB_USERNAME=cs_app_user
-DB_PASSWORD=Pr0duct10n_DB_P@ssw0rd_2024!
+DB_PASSWORD=Pr0duct10n_DB_P@ssw0rd_2026!
 
 REDIS_HOST=cache.internal.cybershield.local
 REDIS_PASSWORD=R3d1s_C@che_S3cr3t!
@@ -95,14 +95,14 @@ AWS_DEFAULT_REGION=us-east-1
 AWS_BUCKET=cybershield-production
 
 JWT_SECRET=jwt_production_secret_key_never_share_this
-API_SECRET=api_master_secret_key_2024''',
+API_SECRET=api_master_secret_key_2026''',
 
     '/var/www/cybershield/config.py': '''# CyberShield Configuration
 import os
 
 class Config:
     SECRET_KEY = os.environ.get('APP_KEY', 'dev-secret-key')
-    DATABASE_URI = 'mysql://cs_app_user:Pr0duct10n_DB_P@ssw0rd_2024!@db.internal.cybershield.local/cybershield_production'
+    DATABASE_URI = 'mysql://cs_app_user:Pr0duct10n_DB_P@ssw0rd_2026!@db.internal.cybershield.local/cybershield_production'
     REDIS_URL = 'redis://:R3d1s_C@che_S3cr3t!@cache.internal.cybershield.local:6379/0'
     
     # API Keys
@@ -114,8 +114,8 @@ class Config:
     ADMIN_PASSWORD = 'Adm1n_Def@ult_P@ss!'
 ''',
 
-    '/home/admin/backups/db_backup_2024.sql': '''-- MySQL dump - CyberShield Database Backup
--- Generated: 2024-03-15 02:00:00
+    '/home/admin/backups/db_backup_2026.sql': '''-- MySQL dump - CyberShield Database Backup
+-- Generated: 2026-03-15 02:00:00
 
 CREATE DATABASE IF NOT EXISTS cybershield_production;
 USE cybershield_production;
@@ -342,7 +342,7 @@ def file_upload():
         payload = request.get_json(silent=True) or {}
         filename = payload.get('filename', filename)
 
-    upload_path = f'/uploads/2024/03/{filename}'
+    upload_path = f'/uploads/2026/03/{filename}'
     looks_polyglot = '.php' in filename.lower() and any(ext in filename.lower() for ext in ['.jpg', '.png', '.gif'])
 
     if looks_polyglot:
@@ -415,7 +415,7 @@ def get_lfi_response(path: str) -> Response:
     elif 'config.py' in path_lower:
         content = FAKE_FILE_CONTENTS['/var/www/cybershield/config.py']
     elif 'backup' in path_lower and 'sql' in path_lower:
-        content = FAKE_FILE_CONTENTS['/home/admin/backups/db_backup_2024.sql']
+        content = FAKE_FILE_CONTENTS['/home/admin/backups/db_backup_2026.sql']
     elif 'users' in path_lower and 'csv' in path_lower:
         content = FAKE_FILE_CONTENTS['/home/admin/backups/users_export.csv']
     elif 'nginx' in path_lower and 'conf' in path_lower:

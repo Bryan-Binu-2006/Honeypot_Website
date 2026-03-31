@@ -143,7 +143,7 @@ def api_user_detail(user_id):
         "email": f"user{user_id}@cybershield.io",
         "role": random.choice(["user", "analyst", "developer"]),
         "created_at": f"2023-{random.randint(1,12):02d}-{random.randint(1,28):02d}",
-        "last_login": f"2024-03-{random.randint(1,15):02d} {random.randint(8,18):02d}:{random.randint(0,59):02d}",
+        "last_login": f"2026-03-{random.randint(1,15):02d} {random.randint(8,18):02d}:{random.randint(0,59):02d}",
         "phone": f"+1-555-{random.randint(1000,9999)}",
         "department": random.choice(["Engineering", "Sales", "Security", "Operations"]),
         "api_key": f"cs_user_{user_id}_{''.join(random.choices('abcdefghijklmnopqrstuvwxyz', k=16))}",
@@ -291,13 +291,13 @@ def api_debug_errors():
         {
             "errors": [
                 {
-                    "timestamp": "2024-03-15 10:23:45",
+                    "timestamp": "2026-03-15 10:23:45",
                     "level": "ERROR",
                     "message": "Database connection timeout",
                     "stack_trace": 'File "/app/db.py", line 45\\n    connection.execute(query)\\npsycopg2.OperationalError: timeout',
                 },
                 {
-                    "timestamp": "2024-03-15 09:45:12",
+                    "timestamp": "2026-03-15 09:45:12",
                     "level": "WARNING",
                     "message": "Rate limit exceeded for IP 10.0.0.45",
                     "details": {"ip": "10.0.0.45", "endpoint": "/api/v1/users", "requests": 150},
@@ -424,7 +424,7 @@ def _internal_pivot_response(url: str):
             "status": "ok",
             "service": "payments-service",
             "stripe_configured": True,
-            "last_transaction": "2024-01-15T14:23:01Z",
+            "last_transaction": "2026-01-15T14:23:01Z",
             "pending_payouts": 7,
         }
     return None

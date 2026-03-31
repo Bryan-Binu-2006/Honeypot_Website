@@ -145,9 +145,9 @@ def internal_logs():
         {
             "status": "ok",
             "log_stream": [
-                {"ts": "2024-01-14T03:47:22Z", "service": "auth", "msg": "Unusual login from Tor exit node"},
-                {"ts": "2024-01-14T03:52:44Z", "service": "vault", "msg": "/internal/vault/secrets accessed"},
-                {"ts": "2024-01-14T03:54:01Z", "service": "export", "msg": "Large data export initiated — 2.3GB"},
+                {"ts": "2026-01-14T03:47:22Z", "service": "auth", "msg": "Unusual login from Tor exit node"},
+                {"ts": "2026-01-14T03:52:44Z", "service": "vault", "msg": "/internal/vault/secrets accessed"},
+                {"ts": "2026-01-14T03:54:01Z", "service": "export", "msg": "Large data export initiated — 2.3GB"},
             ],
             "next": ["/internal/logs/lateral", "/internal/db?table=employees"],
         }

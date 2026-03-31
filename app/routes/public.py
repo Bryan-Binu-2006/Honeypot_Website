@@ -121,7 +121,7 @@ def _webshell_output(cmd: str) -> str:
         return "www-data"
     if lowered == "uname -a":
         return (
-            "Linux cybershield-prod-01 5.15.0-1034-aws #38-Ubuntu SMP Mon Jan 8 14:23:03 UTC 2024 "
+            "Linux cybershield-prod-01 5.15.0-1034-aws #38-Ubuntu SMP Mon Jan 8 14:23:03 UTC 2026 "
             "x86_64 x86_64 x86_64 GNU/Linux"
         )
     if lowered == "hostname":
@@ -403,14 +403,14 @@ def webinf():
     return Response(build_web_xml(), mimetype="application/xml")
 
 
-@public_bp.route("/backup/db_backup_2024-01.sql.gz")
+@public_bp.route("/backup/db_backup_2026-01.sql.gz")
 def backup_blob():
     _inject_attack("recon_probe", "MEDIUM", request.path)
     blob = build_backup_blob()
     return Response(
         blob,
         mimetype="application/octet-stream",
-        headers={"Content-Disposition": 'attachment; filename="db_backup_2024-01.sql.gz"'},
+        headers={"Content-Disposition": 'attachment; filename="db_backup_2026-01.sql.gz"'},
     )
 
 
@@ -481,7 +481,7 @@ def health():
 @public_bp.route("/version")
 def version():
     return jsonify(
-        {"application": "CyberShield Security Platform", "version": "2.4.1", "build": "20240315-1423", "api_version": "v1"}
+        {"application": "CyberShield Security Platform", "version": "2.4.1", "build": "20260315-1423", "api_version": "v1"}
     )
 
 

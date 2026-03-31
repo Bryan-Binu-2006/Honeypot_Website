@@ -225,12 +225,12 @@ SSRF_RESPONSES = {
         headers={'Content-Type': 'text/plain'},
         body='''{
   "Code": "Success",
-  "LastUpdated": "2024-03-15T10:30:00Z",
+  "LastUpdated": "2026-03-15T10:30:00Z",
   "Type": "AWS-HMAC",
   "AccessKeyId": "ASIAFAKEKEY12345678",
   "SecretAccessKey": "FakeSecretAccessKey1234567890ABCDEFGHIJ",
   "Token": "FakeSessionTokenThatIsVeryLongAndLooksReal1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
-  "Expiration": "2024-03-15T16:30:00Z"
+  "Expiration": "2026-03-15T16:30:00Z"
 }''',
         delay_ms=300
     ),
@@ -311,8 +311,8 @@ FILE_UPLOAD_RESPONSES = {
   "message": "File uploaded successfully",
   "file": {
     "name": "image.php.jpg",
-    "path": "/uploads/2024/03/image.php.jpg",
-    "url": "https://cdn.example.com/uploads/2024/03/image.php.jpg",
+    "path": "/uploads/2026/03/image.php.jpg",
+    "url": "https://cdn.example.com/uploads/2026/03/image.php.jpg",
     "size": 15234
   }
 }''',

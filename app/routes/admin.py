@@ -40,22 +40,22 @@ FAKE_API_KEYS = [
         "id": "key_1",
         "name": "Production API",
         "key": "cs_prod_" + "".join(random.choices(string.ascii_letters + string.digits, k=32)),
-        "created": "2024-01-15",
-        "last_used": "2024-03-15",
+        "created": "2026-01-15",
+        "last_used": "2026-03-15",
     },
     {
         "id": "key_2",
         "name": "Staging API",
         "key": "cs_stag_" + "".join(random.choices(string.ascii_letters + string.digits, k=32)),
-        "created": "2024-02-20",
-        "last_used": "2024-03-10",
+        "created": "2026-02-20",
+        "last_used": "2026-03-10",
     },
     {
         "id": "key_3",
         "name": "Development API",
         "key": "cs_dev_" + "".join(random.choices(string.ascii_letters + string.digits, k=32)),
-        "created": "2024-03-01",
-        "last_used": "2024-03-14",
+        "created": "2026-03-01",
+        "last_used": "2026-03-14",
     },
 ]
 
@@ -222,7 +222,7 @@ def user_detail(user_id):
             "username": f"user_{user_id}",
             "email": f"user{user_id}@cybershield.io",
             "role": "user",
-            "last_login": "2024-03-10 12:00:00",
+            "last_login": "2026-03-10 12:00:00",
             "phone": "+1-555-" + str(user_id).zfill(4)[-4:],
             "address": f"{user_id * 10} Fake Street",
             "ssn_last_four": str(user_id * 1234)[-4:],
@@ -244,7 +244,7 @@ def create_api_key():
         "id": f"key_{len(FAKE_API_KEYS) + 1}",
         "name": name,
         "key": "cs_new_" + "".join(random.choices(string.ascii_letters + string.digits, k=32)),
-        "created": "2024-03-15",
+        "created": "2026-03-15",
         "last_used": "Never",
     }
     return jsonify({"status": "success", "key": new_key})
@@ -279,9 +279,9 @@ def wallet():
         }
     }
     transactions = [
-        {"date": "2024-03-14", "type": "Sent", "amount": "0.8 ETH", "to": "contractor payout"},
-        {"date": "2024-03-12", "type": "Sent", "amount": "0.5 ETH", "to": "unknown address — investigation pending"},
-        {"date": "2024-03-10", "type": "Sent", "amount": "1.2 ETH", "to": "Q1 bug bounty payout — do not discuss externally"},
+        {"date": "2026-03-14", "type": "Sent", "amount": "0.8 ETH", "to": "contractor payout"},
+        {"date": "2026-03-12", "type": "Sent", "amount": "0.5 ETH", "to": "unknown address — investigation pending"},
+        {"date": "2026-03-10", "type": "Sent", "amount": "1.2 ETH", "to": "Q1 bug bounty payout — do not discuss externally"},
     ]
     return render_template("admin/wallet.html", wallets=wallets, transactions=transactions)
 
@@ -349,7 +349,7 @@ def config_export():
     return Response(
         jsonify(full_config).get_data(as_text=False),
         mimetype="application/json",
-        headers={"Content-Disposition": 'attachment; filename="cybershield-config-export-2024-01-15.json"'},
+        headers={"Content-Disposition": 'attachment; filename="cybershield-config-export-2026-01-15.json"'},
     )
 
 
@@ -521,13 +521,13 @@ def database_console():
 @admin_bp.route("/logs")
 def logs():
     fake_logs = [
-        {"timestamp": "2024-01-14 03:47:22", "level": "ALERT", "message": "Unusual login from IP 185.220.101.x (Tor exit node) — user: api_service_account"},
-        {"timestamp": "2024-01-14 03:51:09", "level": "INFO", "message": "/api/internal/config accessed — api_service_account"},
-        {"timestamp": "2024-01-14 03:52:44", "level": "INFO", "message": "/internal/vault/secrets accessed — api_service_account"},
-        {"timestamp": "2024-01-14 03:54:01", "level": "CRITICAL", "message": "Large data export initiated — api_service_account — 2.3GB"},
-        {"timestamp": "2024-01-14 03:55:12", "level": "INFO", "message": "Session terminated"},
-        {"timestamp": "2024-01-09 11:22:05", "level": "INFO", "message": "JWT secret rotated by a.novak@cybershield.io"},
-        {"timestamp": "2024-01-03 08:00:00", "level": "INFO", "message": "Scheduled backup completed — cybershield-backups-private/db_backup_2024-01-03.sql.gz"},
+        {"timestamp": "2026-01-14 03:47:22", "level": "ALERT", "message": "Unusual login from IP 185.220.101.x (Tor exit node) — user: api_service_account"},
+        {"timestamp": "2026-01-14 03:51:09", "level": "INFO", "message": "/api/internal/config accessed — api_service_account"},
+        {"timestamp": "2026-01-14 03:52:44", "level": "INFO", "message": "/internal/vault/secrets accessed — api_service_account"},
+        {"timestamp": "2026-01-14 03:54:01", "level": "CRITICAL", "message": "Large data export initiated — api_service_account — 2.3GB"},
+        {"timestamp": "2026-01-14 03:55:12", "level": "INFO", "message": "Session terminated"},
+        {"timestamp": "2026-01-09 11:22:05", "level": "INFO", "message": "JWT secret rotated by a.novak@cybershield.io"},
+        {"timestamp": "2026-01-03 08:00:00", "level": "INFO", "message": "Scheduled backup completed — cybershield-backups-private/db_backup_2026-01-03.sql.gz"},
         {"timestamp": "2023-12-28 22:14:55", "level": "WARN", "message": "/admin/debug/eval accessed outside business hours — m.torres@cybershield.io"},
     ]
     return render_template("admin/logs.html", logs=fake_logs)

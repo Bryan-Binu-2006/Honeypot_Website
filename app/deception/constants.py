@@ -17,14 +17,14 @@ FAKE_HOSTNAME_PROD = "cybershield-prod-01"
 FAKE_HOSTNAME_DB = "db-prod-01.internal.cybershield.io"
 FAKE_HOSTNAME_CACHE = "cache-01.internal.cybershield.io"
 
-FAKE_JWT_SECRET = "hs256-prod-secret-do-not-share-2024"
+FAKE_JWT_SECRET = "hs256-prod-secret-do-not-share-2026"
 FAKE_ADMIN_API_KEY = "adminkey-7f3a9b2c-prod-f3a91"
 FAKE_INTERNAL_API_KEY = "int-api-key-9k2m4n8p-x991"
-FAKE_DB_PASSWORD = "Pr0d#Secur3!2024"
+FAKE_DB_PASSWORD = "Pr0d#Secur3!2026"
 FAKE_DB_USER = "cs_app"
 FAKE_DB_NAME = "cybershield_prod"
-FAKE_REDIS_PASSWORD = "r3d1s_pr0d_k3y_2024"
-FAKE_STAGING_DB_PASS = "Staging#Pass2024!"
+FAKE_REDIS_PASSWORD = "r3d1s_pr0d_k3y_2026"
+FAKE_STAGING_DB_PASS = "Staging#Pass2026!"
 FAKE_STRIPE_KEY = "stripe_live_sim_4eC39HqLyjWDarjtT1zdp7dc"
 FAKE_SENDGRID_KEY = "sendgrid_prod_sim_aBcDeFgHiJkLmNoPqRsTuVwXyZ012345"
 FAKE_AWS_ACCESS_KEY = "AWSAKI_SIM_IOSFODNN7EXAMPLE"
@@ -32,9 +32,9 @@ FAKE_AWS_SECRET_KEY = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
 FAKE_AWS_REGION = "us-east-1"
 FAKE_S3_BUCKET_PRIVATE = "cybershield-backups-private"
 FAKE_S3_BUCKET_ASSETS = "cybershield-prod-assets"
-FAKE_GITLAB_TOKEN = "gitlab_pat_sim_xXfAkEtOkEnXx_2024_prod"
+FAKE_GITLAB_TOKEN = "gitlab_pat_sim_xXfAkEtOkEnXx_2026_prod"
 FAKE_DEPLOY_KEY = "deploy-key-prod-7f3a9b2c"
-FAKE_VAULT_ROOT_TOKEN = "vault_root_sim_CAESFAKE_2024"
+FAKE_VAULT_ROOT_TOKEN = "vault_root_sim_CAESFAKE_2026"
 FAKE_K8S_SERVICE_ACCOUNT = (
     "eyJhbGciOiJSUzI1NiJ9."
     "eyJzdWIiOiJzeXN0ZW06c2VydmljZWFjY291bnQ6ZGVmYXVsdDpjeWJlcnNoaWVsZC1hZG1pbiJ9."
@@ -130,7 +130,7 @@ Sitemap: /sitemap.xml
 
 def build_fake_env_text() -> str:
     return f"""# CyberShield Production Environment
-# Last updated: 2024-01-15 by DevOps
+# Last updated: 2026-01-15 by DevOps
 
 APP_ENV=production
 APP_VERSION=2.4.1
@@ -155,7 +155,7 @@ S3_BUCKET_ASSETS={FAKE_S3_BUCKET_ASSETS}
 S3_BUCKET_BACKUPS={FAKE_S3_BUCKET_PRIVATE}
 
 STRIPE_SECRET_KEY={FAKE_STRIPE_KEY}
-STRIPE_WEBHOOK_SECRET=webhooksec_sim_FakeWebhookSecret2024
+STRIPE_WEBHOOK_SECRET=webhooksec_sim_FakeWebhookSecret2026
 SENDGRID_API_KEY={FAKE_SENDGRID_KEY}
 SENDGRID_FROM=noreply@{FAKE_DOMAIN}
 
@@ -168,7 +168,7 @@ INTERNAL_API_KEY={FAKE_INTERNAL_API_KEY}
 DATADOG_API_KEY={FAKE_DATADOG_API_KEY}
 
 # DO NOT COMMIT - rotate quarterly
-# Last rotated: 2024-01-01 by Alice Novak
+# Last rotated: 2026-01-01 by Alice Novak
 """
 
 
@@ -194,7 +194,7 @@ def build_fake_git_config() -> str:
     remote = origin
     merge = refs/heads/feature/api-v3
 # CI deploy hook: https://{FAKE_DOMAIN}/api/deploy?token={FAKE_DEPLOY_KEY}
-# Emergency unlock: https://{FAKE_DOMAIN}/admin/unlock?token=UNLOCK_DEV_2024
+# Emergency unlock: https://{FAKE_DOMAIN}/admin/unlock?token=UNLOCK_DEV_2026
 # Internal docs: http://wiki.internal.cybershield.io/ops/runbooks
 """
 
@@ -289,7 +289,7 @@ def build_web_xml() -> str:
 
 def build_backup_blob() -> bytes:
     prefix = (
-        "-- CyberShield DB backup Jan 2024. Encrypted with AES-256. "
+        "-- CyberShield DB backup Jan 2026. Encrypted with AES-256. "
         "Key in vault at prod/backup/encryption_key\n"
     ).encode("ascii")
     random_bytes = bytes(random.getrandbits(8) for _ in range(2000))
@@ -337,7 +337,7 @@ def build_fake_sitemap() -> str:
     ]
     parts = ['<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">']
     for p in paths:
-        parts.append(f"<url><loc>https://{FAKE_DOMAIN}{p}</loc><lastmod>2024-03-15</lastmod></url>")
+        parts.append(f"<url><loc>https://{FAKE_DOMAIN}{p}</loc><lastmod>2026-03-15</lastmod></url>")
     parts.append("</urlset>")
     return "".join(parts)
 
@@ -361,7 +361,7 @@ def fake_users(count: int = 50) -> List[Dict[str, object]]:
             "username": "j.okafor",
             "email": "j.okafor@cybershield.io",
             "role": "superadmin",
-            "last_login": "2024-01-15 10:23:45",
+            "last_login": "2026-01-15 10:23:45",
             "note": "SSH key on file. 2FA disabled for legacy reasons. Contact j.okafor@cybershield.io to re-enable.",
         },
         {
@@ -369,14 +369,14 @@ def fake_users(count: int = 50) -> List[Dict[str, object]]:
             "username": "a.novak",
             "email": "a.novak@cybershield.io",
             "role": "superadmin",
-            "last_login": "2024-01-14 18:01:12",
+            "last_login": "2026-01-14 18:01:12",
         },
         {
             "id": 3,
             "username": "s.chen",
             "email": "s.chen@cybershield.io",
             "role": "superadmin",
-            "last_login": "2024-01-14 12:03:55",
+            "last_login": "2026-01-14 12:03:55",
         },
     ]
     roles = (
@@ -393,7 +393,7 @@ def fake_users(count: int = 50) -> List[Dict[str, object]]:
             "username": name,
             "email": f"{name}@cybershield.io",
             "role": role,
-            "last_login": f"2024-01-{(idx % 28) + 1:02d} {8 + (idx % 10):02d}:12:00",
+            "last_login": f"2026-01-{(idx % 28) + 1:02d} {8 + (idx % 10):02d}:12:00",
         }
         if role == "auditor":
             row["can_export_logs"] = True
